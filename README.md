@@ -205,6 +205,21 @@ The full PR-first flow — PR opened immediately, CI result posted as a comment 
 
 ### Step 2 — Provision Snowflake infrastructure
 
+> **Trial account?** Scripts 03, 04, 08, 09, and 10 require External Network Access (EAI) which is not available on trial accounts. Follow the **Trial** column below.
+
+| Script | Full | Trial |
+|---|---|---|
+| 01 config schema | ✅ | ✅ |
+| 02 rbac | ✅ | ✅ |
+| 03 github api integration | ✅ | ❌ skip |
+| 04 git integration | ✅ | ❌ skip |
+| 05 dev environment | ✅ | ✅ |
+| 06 impact analysis | ✅ | ✅ |
+| 07 code generation | ✅ | ✅ |
+| 08 commit workflow | ✅ | ❌ skip |
+| 09 pipeline procs | ✅ | ❌ skip |
+| 10 poll merged prs | ✅ | ❌ skip |
+
 ```bash
 # 01 — Foundation: CONFIG schema, SCHEMA_REGISTRY, SCHEMA_CHANGE_EVENTS, SETTINGS
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/01_config_schema.sql
@@ -222,21 +237,22 @@ WHEN NOT MATCHED THEN INSERT (key, value) VALUES (s.key, s.value);"
 # 02 — RBAC: agent role + grants
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/02_rbac.sql
 
-# 03 — GitHub API: network rule, EAI, PAT secret
-# Store your PAT first:
+# 03 — GitHub API: network rule, EAI, PAT secret  ← FULL VERSION ONLY
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
 CREATE OR REPLACE SECRET SELFHEALING_PROD.CONFIG.GITHUB_PAT
   TYPE = GENERIC_STRING
-  SECRET_STRING = '<your-pat>';"
+  SECRET_STRING = '$GITHUB_PAT';"
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/03_github_api_integration.sql
 
-# 04 — Snowflake native Git repo (links to your GitHub repo)
+# 04 — Snowflake native Git repo  ← FULL VERSION ONLY
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/04_git_integration.sql
 
-# 05–10 — Stored procedures
+# 05–07 — Core stored procedures (trial and full)
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/05_dev_environment.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/06_impact_analysis.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/07_code_generation.sql
+
+# 08–10 — GitHub integration procedures  ← FULL VERSION ONLY
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/08_commit_workflow.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/09_pipeline_procs.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/10_poll_merged_prs.sql
