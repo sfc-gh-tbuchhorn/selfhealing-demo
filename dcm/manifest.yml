@@ -1,0 +1,19 @@
+manifest_version: 2
+type: dcm_project
+
+default_target: prod
+
+templating:
+  configurations:
+    PROD:
+      env: "PROD"
+      env_lower: "prod"
+      db_suffix: "_PROD"
+      db_name: "SELFHEALING_PROD"
+      name_prefix: "SELFHEALING"
+      wh_size: "SMALL"
+
+targets:
+  prod:
+    project_name: "SELFHEALING_PROD"
+    templating_config: PROD
