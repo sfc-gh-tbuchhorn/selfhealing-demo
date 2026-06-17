@@ -211,10 +211,13 @@ snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/01_config_schema.sql
 
 # Populate pipeline config from env vars
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
-INSERT INTO SELFHEALING_PROD.CONFIG.SETTINGS (key, value) VALUES
-  ('github_repo', '$GITHUB_REPO'),
-  ('dbt_project', '$DBT_PROJECT')
-ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;"
+MERGE INTO SELFHEALING_PROD.CONFIG.SETTINGS t
+USING (SELECT 'github_repo' AS key, '$GITHUB_REPO' AS value
+       UNION ALL
+       SELECT 'dbt_project', '$DBT_PROJECT') s
+ON t.key = s.key
+WHEN MATCHED THEN UPDATE SET t.value = s.value
+WHEN NOT MATCHED THEN INSERT (key, value) VALUES (s.key, s.value);"
 
 # 02 — RBAC: agent role + grants
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/02_rbac.sql
