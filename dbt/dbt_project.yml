@@ -1,0 +1,23 @@
+name: selfhealing
+version: '1.0.0'
+config-version: 2
+
+profile: selfhealing
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+
+on-run-end:
+  - "{{ refresh_artifact_registry() }}"
+
+vars:
+  db_name: "SELFHEALING_PROD"
+
+models:
+  selfhealing:
+    silver:
+      +schema: SILVER
+      +materialized: table
+    gold:
+      +schema: GOLD
+      +materialized: table
