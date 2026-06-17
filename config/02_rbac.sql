@@ -49,9 +49,10 @@ GRANT UPDATE ON TABLE SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
 GRANT UPDATE ON TABLE SELFHEALING_PROD.CONFIG.ARTIFACT_REGISTRY
   TO ROLE SELFHEALING_AGENT;
 
--- ── dbt project: create/replace for test project only ────────
-GRANT CREATE DBT PROJECT ON SCHEMA PLATFORM_REGISTRY.DBT
-  TO ROLE SELFHEALING_AGENT;
+-- ── dbt project: only required on full accounts with PLATFORM_REGISTRY ───────
+-- Uncomment if running the full version (not trial):
+-- GRANT CREATE DBT PROJECT ON SCHEMA PLATFORM_REGISTRY.DBT
+--   TO ROLE SELFHEALING_AGENT;
 
 -- ── Warehouse ─────────────────────────────────────────────────
 GRANT USAGE ON WAREHOUSE SELFHEALING_WH
