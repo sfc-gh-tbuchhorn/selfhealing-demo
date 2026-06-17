@@ -177,24 +177,38 @@ Then proceed to **Step 5** (seed registry) in the setup guide below.
 
 ### Running the pipeline on a trial account
 
-Skip steps that require EAI. The pipeline runs like this instead:
+Rather than inserting directly into `SCHEMA_CHANGE_EVENTS`, run a DDL on the BRONZE table to simulate exactly what Openflow would do, then fire the drift detector manually:
 
 ```bash
-# 1. Manually trigger a schema change event
+# 1. Seed the registry baseline (snapshot of current BRONZE schema)
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/11_seed_registry.sql
+
+# 2. Deploy the drift detector task
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/12_drift_detector.sql
+
+# 3. Simulate Openflow adding a column to the source table
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
-INSERT INTO SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
-  (table_schema, table_name, column_name, change_type, new_data_type)
-VALUES ('BRONZE', 'ORDERS', 'discount_code', 'NEW_COLUMN', 'TEXT');"
+ALTER TABLE SELFHEALING_PROD.BRONZE.ORDERS ADD COLUMN discount_code VARCHAR;"
 
-# 2. Get the event ID and run code generation (no EAI needed)
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "SELECT event_id FROM SELFHEALING_PROD.CONFIG.PENDING_SCHEMA_CHANGES LIMIT 1;"
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "CALL SELFHEALING_PROD.CONFIG.GENERATE_ARTIFACT_CODE('<event-id>');"
+# 4. Run the drift detector manually — detects the change and inserts the event
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+EXECUTE TASK SELFHEALING_PROD.CONFIG.SCHEMA_DRIFT_DETECTOR;"
 
-# 3. Run DEV validation, open PR, and post CI comment locally
-GITHUB_PAT=<your-pat> python3 config/materialise_in_dev.py <event-id>
+# 5. Verify the event was detected
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+SELECT * FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS;"
+
+# 6. Run code generation for the event
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+SELECT event_id FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS LIMIT 1;"
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+CALL SELFHEALING_PROD.CONFIG.GENERATE_ARTIFACT_CODE('<event-id>');"
+
+# 7. Run DEV validation locally — opens PR and posts CI result as comment
+python3 config/materialise_in_dev.py <event-id>
 ```
 
-The full PR-first flow — PR opened immediately, CI result posted as a comment — still works end-to-end. The only difference is that step 3 runs from your laptop rather than being triggered automatically by the pipeline task.
+The full PR-first flow — PR opened immediately, CI result posted as a comment — still works end-to-end. The only difference from the full version is that steps 4 and 7 run from your laptop rather than being triggered automatically by Snowflake Tasks.
 
 ---
 
