@@ -10,6 +10,9 @@
 --   NEW_TABLE     — BRONZE has a table with no registry entries
 -- =============================================================
 
+CREATE DATABASE IF NOT EXISTS SELFHEALING_PROD;
+CREATE DATABASE IF NOT EXISTS SELFHEALING_DEV;
+
 USE DATABASE SELFHEALING_PROD;
 USE WAREHOUSE SELFHEALING_WH;
 
