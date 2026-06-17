@@ -1,0 +1,13 @@
+selfhealing:
+  target: prod
+  outputs:
+    prod:
+      type:      snowflake
+      account:   SFSEAPAC-AU_DEMO92
+      user:      JOHN
+      password:  placeholder
+      role:      SELFHEALING_ADMIN
+      warehouse: SELFHEALING_WH
+      database:  SELFHEALING_PROD
+      schema:    PUBLIC
+      threads:   8
