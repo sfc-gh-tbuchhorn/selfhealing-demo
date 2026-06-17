@@ -1,0 +1,28 @@
+{{
+  config(
+    database = var('db_name'),
+    schema   = 'SILVER'
+  )
+}}
+
+SELECT
+    CUSTOMER_ID,
+    FIRST_NAME,
+    LAST_NAME,
+    EMAIL,
+    PHONE,
+    COUNTRY,
+    SEGMENT,
+    CREATED_AT,
+    UPDATED_AT,
+    _SNOWFLAKE_INSERTED_AT,
+    _SNOWFLAKE_UPDATED_AT,
+    LOYALTY_TIER,
+    PREFERRED_CONTACT,
+    PREFERRED_LANGUAGE
+FROM {{ source('bronze', 'customers') }}
+WHERE (_SNOWFLAKE_DELETED IS NULL OR _SNOWFLAKE_DELETED = FALSE)
+QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY CUSTOMER_ID
+    ORDER BY _SNOWFLAKE_UPDATED_AT DESC
+) = 1
