@@ -25,7 +25,7 @@ DROP DATABASE IF EXISTS SELFHEALING_PROD;
 DROP WAREHOUSE IF EXISTS SELFHEALING_WH;
 
 -- ── 4. Drop the agent role ────────────────────────────────────
-DROP ROLE IF EXISTS SELFHEALING_AGENT;
+DROP ROLE IF EXISTS SELFHEALING_PIPELINE;
 
 -- ── 5. Account-level integrations (full version only — trial ──
 --       never created these, so they are skipped harmlessly) ──
@@ -35,4 +35,4 @@ DROP API INTEGRATION IF EXISTS GITHUB_GIT_API_INTEGRATION;
 -- ── 6. Verify nothing remains ─────────────────────────────────
 SHOW DATABASES LIKE 'SELFHEALING_%';
 SHOW WAREHOUSES LIKE 'SELFHEALING_WH';
-SHOW ROLES LIKE 'SELFHEALING_AGENT';
+SHOW ROLES LIKE 'SELFHEALING_PIPELINE';
