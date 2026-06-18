@@ -140,50 +140,68 @@ Snowflake trial accounts (including Business Critical) have two restrictions tha
 
 Everything else works on a trial account: Cortex LLMs, Snowpark Python stored procs, Tasks, zero-copy clones, and Snowflake-native Git integration.
 
-### Seeding BRONZE without Openflow
+### Full setup sequence for trial accounts
 
-Run the trial setup script — creates the BRONZE schema, tables, and loads sample data (10 customers, 15 orders, 20 order items):
+Follow this order — replacing the Openflow and EAI steps with the trial equivalents:
 
 ```bash
+# Step 1 — Foundation (database, warehouse, schema, tables)
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/01_config_schema.sql
+
+# Step 1b — Populate config settings
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+MERGE INTO SELFHEALING_PROD.CONFIG.SETTINGS t
+USING (SELECT 'github_repo' AS key, '$GITHUB_REPO' AS value
+       UNION ALL
+       SELECT 'dbt_project', '$DBT_PROJECT') s
+ON t.key = s.key
+WHEN MATCHED THEN UPDATE SET t.value = s.value
+WHEN NOT MATCHED THEN INSERT (key, value) VALUES (s.key, s.value);"
+
+# Step 2 — RBAC
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/02_rbac.sql
+
+# Step 3 — Core stored procedures
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/05_dev_environment.sql
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/06_impact_analysis.sql
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/07_code_generation.sql
+
+# Step 4 — Create BRONZE tables and load sample data
+#           (replaces Openflow — run AFTER 01 has created the database)
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/trial_bronze_setup.sql
-```
 
-Then proceed to **Step 5** (seed registry) in the setup guide below.
-
-### Running the pipeline on a trial account
-
-Rather than inserting directly into `SCHEMA_CHANGE_EVENTS`, run a DDL on the BRONZE table to simulate exactly what Openflow would do, then fire the drift detector manually:
-
-```bash
-# 1. Seed the registry baseline (snapshot of current BRONZE schema)
+# Step 5 — Seed the registry baseline (must run AFTER BRONZE tables exist)
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/11_seed_registry.sql
 
-# 2. Deploy the drift detector task
+# Step 6 — Deploy the drift detector task
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/12_drift_detector.sql
+```
 
-# 3. Simulate Openflow adding a column to the source table
+### Simulating a schema change
+
+```bash
+# Simulate Openflow adding a column
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
 ALTER TABLE SELFHEALING_PROD.BRONZE.ORDERS ADD COLUMN discount_code VARCHAR;"
 
-# 4. Run the drift detector manually — detects the change and inserts the event
+# Run the drift detector manually — detects the change and writes the event
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
 EXECUTE TASK SELFHEALING_PROD.CONFIG.SCHEMA_DRIFT_DETECTOR;"
 
-# 5. Verify the event was detected
+# Verify the event was detected
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
-SELECT * FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS;"
+SELECT event_id, change_type, table_name, column_name, pipeline_status
+FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS;"
 
-# 6. Run code generation for the event
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
-SELECT event_id FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS LIMIT 1;"
+# Run code generation (copy the event_id from the query above)
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
 CALL SELFHEALING_PROD.CONFIG.GENERATE_ARTIFACT_CODE('<event-id>');"
 
-# 7. Run DEV validation locally — opens PR and posts CI result as comment
+# Run DEV validation locally — opens PR and posts CI result as comment
 python3 config/materialise_in_dev.py <event-id>
 ```
 
-The full PR-first flow — PR opened immediately, CI result posted as a comment — still works end-to-end. The only difference from the full version is that steps 4 and 7 run from your laptop rather than being triggered automatically by Snowflake Tasks.
+The full PR-first flow — PR opened immediately, CI result posted as a comment — still works end-to-end. The only difference from the full version is that the drift detector and GitHub integration run from your laptop rather than being triggered automatically by Snowflake Tasks.
 
 ---
 
