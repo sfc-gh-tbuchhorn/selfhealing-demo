@@ -142,35 +142,10 @@ Everything else works on a trial account: Cortex LLMs, Snowpark Python stored pr
 
 ### Seeding BRONZE without Openflow
 
-Create the BRONZE schema and tables manually:
+Run the trial setup script — creates the BRONZE schema, tables, and loads sample data (10 customers, 15 orders, 20 order items):
 
 ```bash
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
-CREATE SCHEMA IF NOT EXISTS SELFHEALING_PROD.BRONZE;
-
-CREATE TABLE IF NOT EXISTS SELFHEALING_PROD.BRONZE.ORDERS (
-    id           INT,
-    customer_id  INT,
-    status       VARCHAR,
-    total_amount FLOAT,
-    order_date   DATE,
-    _loaded_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
-);
-CREATE TABLE IF NOT EXISTS SELFHEALING_PROD.BRONZE.CUSTOMERS (
-    id         INT,
-    name       VARCHAR,
-    email      VARCHAR,
-    country    VARCHAR,
-    _loaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
-);
-CREATE TABLE IF NOT EXISTS SELFHEALING_PROD.BRONZE.ORDER_ITEMS (
-    id         INT,
-    order_id   INT,
-    product    VARCHAR,
-    quantity   INT,
-    unit_price FLOAT,
-    _loaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
-);"
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/trial_bronze_setup.sql
 ```
 
 Then proceed to **Step 5** (seed registry) in the setup guide below.
