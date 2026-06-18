@@ -1,77 +1,40 @@
 -- =============================================================
--- 10_pipeline_tasks.sql
--- Task DAG — fully Snowflake-native pipeline.
--- No local machine required after initial stage setup.
+-- 13_pipeline_tasks.sql
+-- Core pipeline task — works on trial and full accounts.
 --
--- DAG structure:
+-- PIPELINE_ROOT polls for PENDING schema change events every
+-- 5 minutes. If a PENDING event exists it calls
+-- GENERATE_ARTIFACT_CODE to generate updated dbt models.
+-- No EAI or PLATFORM_REGISTRY required.
 --
---   PIPELINE_ROOT (5 min, WHEN pending events exist)
---     └─ calls GENERATE_AND_PREP()
---     └─ triggers: RUN_DEV_TEST
---          └─ calls EXECUTE DBT PROJECT SELFHEALING_TEST in DEV
---          └─ triggers (on success): COMMIT_AND_MR
---               └─ calls COMMIT_TO_GITHUB()
---   PIPELINE_FINALIZER (finalizer for PIPELINE_ROOT, always runs)
---     └─ calls HANDLE_TEST_FAILURE()
---        reverts stage + marks FAILED if stuck in TESTING state
+-- After this task fires, run materialise_in_dev.py locally
+-- to validate in DEV and open the PR.
 --
--- Status guarantees:
---   • COMMIT_AND_MR only fires if dbt PASS → GitHub PR opened
---   • PIPELINE_FINALIZER always fires → reverts files on failure
---   • Filesystem (stage) always clean after any run
+-- On full accounts, also run 14_pipeline_tasks_full.sql to
+-- automate the DEV test and GitHub PR steps inside Snowflake.
 -- =============================================================
 
 USE DATABASE SELFHEALING_PROD;
 USE WAREHOUSE SELFHEALING_WH;
 
--- Suspend existing tasks before recreating
-ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.COMMIT_AND_MR        SUSPEND;
-ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.RUN_DEV_TEST         SUSPEND;
-ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.PIPELINE_FINALIZER   SUSPEND;
-ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.PIPELINE_ROOT        SUSPEND;
+ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.PIPELINE_ROOT SUSPEND;
 
--- -----------------------------------------------------------
--- ROOT: runs every 5 minutes, skips if nothing to process
--- -----------------------------------------------------------
 CREATE OR REPLACE TASK SELFHEALING_PROD.CONFIG.PIPELINE_ROOT
     WAREHOUSE = SELFHEALING_WH
     SCHEDULE  = '5 MINUTE'
 AS
-    CALL SELFHEALING_PROD.CONFIG.GENERATE_AND_PREP();
+DECLARE
+    v_event_id VARCHAR;
+BEGIN
+    SELECT event_id INTO :v_event_id
+    FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
+    WHERE pipeline_status = 'PENDING'
+    ORDER BY detected_at
+    LIMIT 1;
 
--- -----------------------------------------------------------
--- RUN_DEV_TEST: execute dbt against SELFHEALING_DEV
--- Runs all models — validates accumulated changes together
--- -----------------------------------------------------------
-CREATE OR REPLACE TASK SELFHEALING_PROD.CONFIG.RUN_DEV_TEST
-    WAREHOUSE = SELFHEALING_WH
-    AFTER     SELFHEALING_PROD.CONFIG.PIPELINE_ROOT
-AS
-    EXECUTE DBT PROJECT PLATFORM_REGISTRY.DBT.SELFHEALING_TEST
-        ARGS = 'run --vars "{db_name: SELFHEALING_DEV}" --target prod';
+    IF (v_event_id IS NOT NULL) THEN
+        CALL SELFHEALING_PROD.CONFIG.GENERATE_ARTIFACT_CODE(:v_event_id);
+    END IF;
+END;
 
--- -----------------------------------------------------------
--- COMMIT_AND_MR: open GitHub PR only after dbt passes
--- -----------------------------------------------------------
-CREATE OR REPLACE TASK SELFHEALING_PROD.CONFIG.COMMIT_AND_MR
-    WAREHOUSE = SELFHEALING_WH
-    AFTER     SELFHEALING_PROD.CONFIG.RUN_DEV_TEST
-AS
-    CALL SELFHEALING_PROD.CONFIG.COMMIT_TO_GITHUB();
-
--- -----------------------------------------------------------
--- PIPELINE_FINALIZER: always runs — reverts on failure
--- -----------------------------------------------------------
-CREATE OR REPLACE TASK SELFHEALING_PROD.CONFIG.PIPELINE_FINALIZER
-    WAREHOUSE = SELFHEALING_WH
-    FINALIZE  = SELFHEALING_PROD.CONFIG.PIPELINE_ROOT
-AS
-    CALL SELFHEALING_PROD.CONFIG.HANDLE_TEST_FAILURE();
-
--- -----------------------------------------------------------
--- Resume tasks (leaf-to-root order required by Snowflake)
--- -----------------------------------------------------------
-ALTER TASK SELFHEALING_PROD.CONFIG.PIPELINE_FINALIZER RESUME;
-ALTER TASK SELFHEALING_PROD.CONFIG.COMMIT_AND_MR      RESUME;
-ALTER TASK SELFHEALING_PROD.CONFIG.RUN_DEV_TEST       RESUME;
-ALTER TASK SELFHEALING_PROD.CONFIG.PIPELINE_ROOT      RESUME;
+ALTER TASK SELFHEALING_PROD.CONFIG.PIPELINE_ROOT RESUME;
