@@ -184,6 +184,9 @@ snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/11_seed_registry.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/12_drift_detector.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/13_pipeline_tasks.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/15_run_as_pipeline.sql
+
+# Resolution proc — advances SCHEMA_REGISTRY after you merge a PR
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/16_resolve_event.sql
 ```
 
 ### Step 4 — Full account setup (Enterprise+ with EAI and Openflow)
@@ -226,6 +229,7 @@ snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/12_drift_detector.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/13_pipeline_tasks.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/14_pipeline_tasks_full.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/15_run_as_pipeline.sql
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/16_resolve_event.sql
 ```
 
 After this, schema changes flowing in through Openflow are detected, code-generated, validated in a DEV clone, and raised as PRs **entirely by Snowflake Tasks** — no local `materialise_in_dev.py` needed. `14_pipeline_tasks_full.sql` replaces the trial `PIPELINE_ROOT` (which only generates code) with the full DAG: `PIPELINE_ROOT` (`GENERATE_AND_PREP`) → `RUN_DEV_TEST` → `COMMIT_AND_MR`, plus `PIPELINE_FINALIZER`.
@@ -263,12 +267,23 @@ python3 config/materialise_in_dev.py <event-id>
 
 `materialise_in_dev.py` opens the PR immediately (before tests — it's a guaranteed deliverable), zero-copy clones PROD→DEV, runs `dbt run --select source:bronze.<table>+` against the clone, then posts a ✅ or ❌ comment and sets `pipeline_status` to `CI_PASSED` / `CI_FAILED`.
 
+### 6. Merge and re-baseline
+
+Review the PR and CI comment, then **merge** it. On a full account a GitHub Action calls `SYNC_FROM_MAIN` to advance the baseline automatically. On **trial**, run the resolution step manually after merging — this advances `SCHEMA_REGISTRY` to include the change and marks the event `RESOLVED`, so the drift detector stops re-flagging it:
+
+```bash
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+CALL SELFHEALING_PROD.CONFIG.RESOLVE_EVENT('<event-id>');"
+```
+
+> If you skip this on trial, the scheduled drift detector will keep re-detecting the same change on every run, because `SCHEMA_REGISTRY` still reflects the pre-change schema.
+
 ---
 
 ## Pipeline status lifecycle
 
 ```
-PENDING → GENERATING → PR_OPEN → CI_PASSED
+PENDING → GENERATING → PR_OPEN → CI_PASSED → (merge) → RESOLVED
                               ↘ CI_FAILED  (PR stays open, needs human review)
 ```
 
