@@ -173,8 +173,9 @@ snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/trial_bronze_setup.sql
 # Step 5 — Seed the registry baseline (must run AFTER BRONZE tables exist)
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/11_seed_registry.sql
 
-# Step 6 — Deploy the drift detector task
+# Step 6 — Deploy the drift detector and core pipeline task
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/12_drift_detector.sql
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/13_pipeline_tasks.sql
 ```
 
 ### Simulating a schema change
@@ -240,6 +241,8 @@ The full PR-first flow — PR opened immediately, CI result posted as a comment 
 | 08 commit workflow | ✅ | ❌ skip |
 | 09 pipeline procs | ✅ | ❌ skip |
 | 10 poll merged prs | ✅ | ❌ skip |
+| 13 pipeline tasks (core) | ✅ | ✅ |
+| 14 pipeline tasks full | ✅ | ❌ skip |
 
 ```bash
 # 01 — Foundation: CONFIG schema, SCHEMA_REGISTRY, SCHEMA_CHANGE_EVENTS, SETTINGS
@@ -306,11 +309,19 @@ snow dbt deploy SELFHEALING_PROD.CONFIG.SELFHEALING \
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/11_seed_registry.sql
 ```
 
-### Step 6 — Start the drift detector
+### Step 6 — Start the drift detector and pipeline task
 
 ```bash
+# Drift detector — works on trial and full
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/12_drift_detector.sql
+
+# Core pipeline task — works on trial and full
+# Polls for PENDING events every 5 min and calls GENERATE_ARTIFACT_CODE
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/13_pipeline_tasks.sql
+
+# Full DAG tasks — FULL VERSION ONLY
+# Adds automated DEV test + GitHub PR after code generation
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/14_pipeline_tasks_full.sql
 ```
 
 ## Pipeline status lifecycle
