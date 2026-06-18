@@ -31,19 +31,7 @@ CREATE OR REPLACE TASK SELFHEALING_PROD.CONFIG.PIPELINE_ROOT
     WAREHOUSE = SELFHEALING_WH
     SCHEDULE  = '5 MINUTE'
 AS
-DECLARE
-    v_event_id VARCHAR;
-BEGIN
-    SELECT event_id INTO :v_event_id
-    FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
-    WHERE pipeline_status = 'PENDING'
-    ORDER BY detected_at
-    LIMIT 1;
-
-    IF (v_event_id IS NOT NULL) THEN
-        CALL SELFHEALING_PROD.CONFIG.GENERATE_AND_PREP();
-    END IF;
-END;
+    CALL SELFHEALING_PROD.CONFIG.GENERATE_AND_PREP();
 
 -- -----------------------------------------------------------
 -- RUN_DEV_TEST: dbt run against SELFHEALING_DEV clone
