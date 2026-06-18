@@ -178,10 +178,10 @@ def run(event_id):
     table_name, change_type, column_name, branch_name = row[0].lower(), row[1], row[2] or '', row[3] or ''
     print(f"\nEvent: {change_type} on {table_name.upper()}")
 
-    # ── 2. Fetch generated code from DEV ──────────────────────
+    # ── 2. Fetch generated code from PROD ─────────────────────
     cur.execute(f"""
         SELECT ARTIFACT_NAME, FILE_PATH, GENERATED_SQL, ACTION
-        FROM {DEV_DB}.CONFIG.GENERATED_CODE
+        FROM {PROD_DB}.CONFIG.GENERATED_CODE
         WHERE EVENT_ID = '{event_id}'
         ORDER BY GENERATED_AT
     """)
@@ -257,7 +257,7 @@ def run(event_id):
             artifact_name, (overall_status, err_excerpt)
         )
         cur.execute(f"""
-            UPDATE {DEV_DB}.CONFIG.GENERATED_CODE
+            UPDATE {PROD_DB}.CONFIG.GENERATED_CODE
             SET TEST_STATUS = '{model_status}',
                 TEST_ERROR  = '{detail[:500].replace(chr(39), chr(39)+chr(39))}'
             WHERE EVENT_ID     = '{event_id}'
