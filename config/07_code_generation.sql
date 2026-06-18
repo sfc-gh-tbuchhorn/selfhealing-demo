@@ -34,11 +34,25 @@ import re
 MODEL = 'llama3.1-70b'
 
 
+def clean_llm_output(text):
+    """
+    Normalise raw LLM output: strip markdown code fences and decode
+    JSON-string-encoded output (some models return the SQL wrapped in
+    double quotes with literal \\n escapes instead of raw text).
+    """
+    t = text.strip()
+    if t.startswith('```'):
+        t = re.sub(r'^```[a-zA-Z]*\n?', '', t)
+        t = re.sub(r'\n?```$', '', t).strip()
+    if len(t) >= 2 and t.startswith('"') and t.endswith('"'):
+        try:
+            t = json.loads(t)
+        except Exception:
+            pass
+    return t
+
+
 def restore_config_block(original_sql, generated_sql):
-    """
-    Safety net: if the LLM stripped the {{ config(...) }} block,
-    extract it from the original and prepend it to the generated SQL.
-    """
     if generated_sql.strip().startswith('{{'):
         return generated_sql
     match = re.match(r'(\{\{.*?\}\})', original_sql.strip(), re.DOTALL)
@@ -266,6 +280,7 @@ def run(session, event_id):
 
             # Prompt passed as column value — no escaping
             result = cortex_complete(session, prompt)
+            result = clean_llm_output(result)
             result = restore_config_block(artifact_sql, result)
             result = restore_ref_calls(artifact_sql, result)
             result = restore_source_calls(artifact_sql, result)
@@ -297,6 +312,7 @@ def run(session, event_id):
 
         prompt = build_new_table_prompt(table_name, columns, primary_key)
         result = cortex_complete(session, prompt)
+        result = clean_llm_output(result)
 
         parts        = result.split('---SOURCES_YML---')
         model_sql    = parts[0].strip()
