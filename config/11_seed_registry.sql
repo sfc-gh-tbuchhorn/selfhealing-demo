@@ -49,7 +49,7 @@ ORDER BY 1;
 -- so either upstream change triggers re-generation.
 -- -----------------------------------------------------------
 INSERT INTO SELFHEALING_PROD.CONFIG.ARTIFACT_REGISTRY
-    (artifact_name, artifact_type, source_table, source_columns, artifact_sql, file_path)
+    (artifact_name, artifact_type, source_table, source_columns, artifact_sql, file_path, snowflake_fqn)
 VALUES
     -- SILVER models (direct BRONZE consumers)
     ('silver.customers',
@@ -57,21 +57,21 @@ VALUES
      'BRONZE.CUSTOMERS',
      NULL,
      'SELECT CUSTOMER_ID, FIRST_NAME, LAST_NAME, EMAIL, PHONE, COUNTRY, SEGMENT, CREATED_AT, UPDATED_AT, _SNOWFLAKE_INSERTED_AT, _SNOWFLAKE_UPDATED_AT FROM SELFHEALING_PROD.BRONZE.CUSTOMERS WHERE (_SNOWFLAKE_DELETED IS NULL OR _SNOWFLAKE_DELETED = FALSE) QUALIFY ROW_NUMBER() OVER (PARTITION BY CUSTOMER_ID ORDER BY _SNOWFLAKE_UPDATED_AT DESC) = 1',
-     'models/silver/customers.sql'),
+     'models/silver/customers.sql', 'SELFHEALING_PROD.SILVER.CUSTOMERS'),
 
     ('silver.orders',
      'dbt_model',
      'BRONZE.ORDERS',
      NULL,
      'SELECT ORDER_ID, CUSTOMER_ID, ORDER_DATE, STATUS, TOTAL_AMOUNT, CURRENCY, CHANNEL, CREATED_AT, UPDATED_AT, _SNOWFLAKE_INSERTED_AT, _SNOWFLAKE_UPDATED_AT FROM SELFHEALING_PROD.BRONZE.ORDERS WHERE (_SNOWFLAKE_DELETED IS NULL OR _SNOWFLAKE_DELETED = FALSE) QUALIFY ROW_NUMBER() OVER (PARTITION BY ORDER_ID ORDER BY _SNOWFLAKE_UPDATED_AT DESC) = 1',
-     'models/silver/orders.sql'),
+     'models/silver/orders.sql', 'SELFHEALING_PROD.SILVER.ORDERS'),
 
     ('silver.order_items',
      'dbt_model',
      'BRONZE.ORDER_ITEMS',
      NULL,
      'SELECT ITEM_ID, ORDER_ID, PRODUCT_ID, PRODUCT_NAME, CATEGORY, QUANTITY, UNIT_PRICE, CREATED_AT, _SNOWFLAKE_INSERTED_AT, _SNOWFLAKE_UPDATED_AT FROM SELFHEALING_PROD.BRONZE.ORDER_ITEMS WHERE (_SNOWFLAKE_DELETED IS NULL OR _SNOWFLAKE_DELETED = FALSE) QUALIFY ROW_NUMBER() OVER (PARTITION BY ITEM_ID ORDER BY _SNOWFLAKE_UPDATED_AT DESC) = 1',
-     'models/silver/order_items.sql'),
+     'models/silver/order_items.sql', 'SELFHEALING_PROD.SILVER.ORDER_ITEMS'),
 
     -- GOLD models — two rows for orders_daily (joins SILVER.ORDERS + SILVER.CUSTOMERS)
     ('gold.orders_daily',
@@ -79,21 +79,21 @@ VALUES
      'SILVER.ORDERS',
      NULL,
      'SELECT DATE_TRUNC(''DAY'', o.ORDER_DATE) AS order_date, c.COUNTRY, c.SEGMENT, o.CHANNEL, o.STATUS, COUNT(DISTINCT o.ORDER_ID) AS order_count, COUNT(DISTINCT o.CUSTOMER_ID) AS customer_count, SUM(o.TOTAL_AMOUNT) AS total_revenue, AVG(o.TOTAL_AMOUNT) AS avg_order_value FROM SELFHEALING_PROD.SILVER.ORDERS o JOIN SELFHEALING_PROD.SILVER.CUSTOMERS c ON o.CUSTOMER_ID = c.CUSTOMER_ID GROUP BY 1,2,3,4,5',
-     'models/gold/orders_daily.sql'),
+     'models/gold/orders_daily.sql', 'SELFHEALING_PROD.GOLD.ORDERS_DAILY'),
 
     ('gold.orders_daily',
      'dbt_model',
      'SILVER.CUSTOMERS',
      NULL,
      'SELECT DATE_TRUNC(''DAY'', o.ORDER_DATE) AS order_date, c.COUNTRY, c.SEGMENT, o.CHANNEL, o.STATUS, COUNT(DISTINCT o.ORDER_ID) AS order_count, COUNT(DISTINCT o.CUSTOMER_ID) AS customer_count, SUM(o.TOTAL_AMOUNT) AS total_revenue, AVG(o.TOTAL_AMOUNT) AS avg_order_value FROM SELFHEALING_PROD.SILVER.ORDERS o JOIN SELFHEALING_PROD.SILVER.CUSTOMERS c ON o.CUSTOMER_ID = c.CUSTOMER_ID GROUP BY 1,2,3,4,5',
-     'models/gold/orders_daily.sql'),
+     'models/gold/orders_daily.sql', 'SELFHEALING_PROD.GOLD.ORDERS_DAILY'),
 
     ('gold.category_summary',
      'dbt_model',
      'SILVER.ORDER_ITEMS',
      NULL,
      'SELECT oi.CATEGORY, COUNT(DISTINCT oi.ITEM_ID) AS items_sold, SUM(oi.QUANTITY) AS total_units, SUM(oi.QUANTITY * oi.UNIT_PRICE) AS total_revenue, AVG(oi.UNIT_PRICE) AS avg_unit_price, COUNT(DISTINCT oi.ORDER_ID) AS order_count FROM SELFHEALING_PROD.SILVER.ORDER_ITEMS oi GROUP BY 1',
-     'models/gold/category_summary.sql');
+     'models/gold/category_summary.sql', 'SELFHEALING_PROD.GOLD.CATEGORY_SUMMARY');
 
 -- Verify
 SELECT ARTIFACT_NAME, ARTIFACT_TYPE, SOURCE_TABLE
