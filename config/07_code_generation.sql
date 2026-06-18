@@ -73,19 +73,17 @@ def restore_source_calls(original_sql, generated_sql):
     """
     Safety net: the LLM often changes the case of source() arguments,
     e.g. source('bronze','orders') -> source('BRONZE','ORDERS'). dbt
-    source names are case-sensitive, so restore the exact original
-    source() calls keyed on the lowercased table name.
+    source names are case-sensitive and sources.yml declares them in
+    lowercase, so deterministically lowercase both source() arguments.
     """
-    src_pattern = re.compile(r"\{\{\s*source\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"](\w+)['\"]\s*\)\s*\}\}")
-    original_srcs = {m.group(2).lower(): m.group(0) for m in src_pattern.finditer(original_sql)}
-    if not original_srcs:
-        return generated_sql
+    src_pattern = re.compile(
+        r"(\{\{\s*source\(\s*['\"])([^'\"]+)(['\"]\s*,\s*['\"])(\w+)(['\"]\s*\)\s*\}\})"
+    )
 
-    def replace_source(m):
-        table = m.group(2).lower()
-        return original_srcs.get(table, m.group(0))
+    def lower_args(m):
+        return m.group(1) + m.group(2).lower() + m.group(3) + m.group(4).lower() + m.group(5)
 
-    return src_pattern.sub(replace_source, generated_sql)
+    return src_pattern.sub(lower_args, generated_sql)
 
 
 def cortex_complete(session, prompt):
