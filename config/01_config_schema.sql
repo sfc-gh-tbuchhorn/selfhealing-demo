@@ -88,3 +88,10 @@ CREATE TABLE IF NOT EXISTS SELFHEALING_PROD.CONFIG.SETTINGS (
     key   VARCHAR NOT NULL PRIMARY KEY,
     value VARCHAR NOT NULL
 );
+
+-- Prompt staging — passes prompts to CORTEX.COMPLETE from inside
+-- nested stored procs (avoids the temp-view restriction).
+CREATE TABLE IF NOT EXISTS SELFHEALING_PROD.CONFIG.PROMPT_STAGING (
+    job_id  VARCHAR NOT NULL,
+    prompt  VARCHAR NOT NULL
+);
