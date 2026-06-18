@@ -2,12 +2,13 @@ selfhealing:
   target: prod
   outputs:
     prod:
-      type:      snowflake
-      account:   SFSEAPAC-AU_DEMO92
-      user:      JOHN
-      password:  placeholder
-      role:      SELFHEALING_ADMIN
-      warehouse: SELFHEALING_WH
-      database:  SELFHEALING_PROD
-      schema:    PUBLIC
-      threads:   8
+      type:          snowflake
+      account:       "{{ env_var('SNOWFLAKE_ACCOUNT', '') }}"
+      user:          "{{ env_var('SNOWFLAKE_USER', '') }}"
+      authenticator: "{{ env_var('DBT_AUTHENTICATOR', 'snowflake') }}"
+      password:      "{{ env_var('DBT_PASSWORD', '') }}"
+      role:          "{{ env_var('DBT_ROLE', 'ACCOUNTADMIN') }}"
+      warehouse:     "{{ env_var('DBT_WAREHOUSE', 'SELFHEALING_WH') }}"
+      database:      "{{ env_var('DBT_DATABASE', 'SELFHEALING_PROD') }}"
+      schema:        PUBLIC
+      threads:       4
