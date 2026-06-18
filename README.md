@@ -70,20 +70,13 @@ When `BRONZE.ORDERS` changes, the recursive CTE returns `SILVER.ORDERS` (depth 1
 
 | Requirement | Notes |
 |---|---|
-| Snowflake account | Cortex LLM enabled; `llama3.1-70b` accessible |
-| Openflow connector | Snowflake-native CDC; PostgreSQL connector configured |
-| Snowflake dbt | `snow dbt deploy` available; `PLATFORM_REGISTRY.DBT` schema exists |
-| GitHub account + PAT | `repo` scope; stored as `SELFHEALING_PROD.CONFIG.GITHUB_PAT` secret |
+| Snowflake account | Cortex LLM enabled; `llama3.1-70b` accessible. Trial accounts need a payment method on file for Cortex (see Step 2) |
+| GitHub account + PAT | `repo` scope |
 | Python 3.8+ | `snowflake-connector-python`, `requests`, `snow` CLI |
+| Openflow connector | **Full version only** — Snowflake-native PostgreSQL CDC. On trial, replaced by `trial_bronze_setup.sql` |
+| `PLATFORM_REGISTRY.DBT` | **Full version only** — the dbt project registry. On trial, the dbt project lives in your own schema |
 
-### Snowflake connections
-
-| Name | Used by | Auth |
-|---|---|---|
-| `demo_au` | Snow CLI commands | Any |
-| `demo_au_PAT` | `materialise_in_dev.py` (Python connector) | PAT or key-pair |
-
-Update these in `config/materialise_in_dev.py` and Snow CLI config.
+Connections and repo are configured entirely through environment variables (see Setup Step 1) — no file edits required.
 
 ## Repo structure
 
@@ -132,94 +125,68 @@ selfhealing_demo/
 └── load_order_items.py
 ```
 
-## Running on a trial account
+## Setup
 
-Snowflake trial accounts (including Business Critical) have two restrictions that affect this demo:
+### Step 1 — Fork, clone, and set environment variables
 
-| Blocked feature | Used for | Workaround |
+1. **Fork** this repository — the pipeline opens PRs and posts comments to **your fork**, not the original.
+2. **Clone** your fork:
+   ```bash
+   git clone https://github.com/<your-username>/selfhealing-demo.git
+   cd selfhealing-demo
+   ```
+3. **Set environment variables** (required before any script):
+   ```bash
+   export SNOWFLAKE_CONNECTION_SQL=<your-snow-cli-connection>
+   export SNOWFLAKE_CONNECTION_PY=<your-snow-cli-connection>
+   export GITHUB_REPO=<your-username>/selfhealing-demo
+   export GITHUB_PAT=<your-github-pat>
+   export DBT_PROJECT=SELFHEALING_PROD.CONFIG.SELFHEALING   # any unused FQN
+   ```
+
+### Step 2 — Trial vs full account
+
+This demo runs on a trial account with two substitutions. The table below shows which scripts run on each path.
+
+| Blocked on trial | Used for | Trial substitution |
 |---|---|---|
-| **External network access** | Stored procs calling the GitHub REST API (open PR, post CI comments) | Skip `03_github_api_integration.sql` and `04_git_integration.sql`. Use `materialise_in_dev.py` locally — it calls GitHub directly from Python and handles the full PR-first flow without EAI |
-| **Openflow** | Streaming Postgres CDC into BRONZE | Seed BRONZE manually (see below) |
+| **External network access (EAI)** | Stored procs calling the GitHub REST API | Skip `03`, `04`, `08`, `09`, `10`, `14`; `materialise_in_dev.py` does the GitHub work locally |
+| **Openflow** | Streaming Postgres CDC into BRONZE | `trial_bronze_setup.sql` seeds BRONZE with sample data |
 
-Everything else works on a trial account: Cortex LLMs, Snowpark Python stored procs, Tasks, zero-copy clones, and Snowflake-native Git integration.
+> **Cortex needs a payment method on trial.** Snowflake Cortex LLM functions are blocked on trial accounts until you add a credit card (Admin → Billing → Add Credit Card). You keep your free credits, but the code-generation step fails without it.
 
-### Full setup sequence for trial accounts
+### Step 3 — Trial account setup
 
-Follow this order — replacing the Openflow and EAI steps with the trial equivalents:
+Run in this order (skips the EAI/Openflow scripts):
 
 ```bash
-# Step 1 — Foundation (database, warehouse, schema, tables)
+# Foundation
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/01_config_schema.sql
 
-# Step 1b — Populate config settings
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
-MERGE INTO SELFHEALING_PROD.CONFIG.SETTINGS t
-USING (SELECT 'github_repo' AS key, '$GITHUB_REPO' AS value
-       UNION ALL
-       SELECT 'dbt_project', '$DBT_PROJECT') s
-ON t.key = s.key
-WHEN MATCHED THEN UPDATE SET t.value = s.value
-WHEN NOT MATCHED THEN INSERT (key, value) VALUES (s.key, s.value);"
-
-# Step 2 — RBAC
+# RBAC
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/02_rbac.sql
 
-# Step 3 — Core stored procedures
+# Core stored procedures
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/05_dev_environment.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/06_impact_analysis.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/07_code_generation.sql
 
-# Step 4 — Create BRONZE tables and load sample data
-#           (replaces Openflow — run AFTER 01 has created the database)
+# Seed BRONZE with sample data (replaces Openflow), then materialise SILVER/GOLD
+# in PROD with an initial dbt run so the DEV clone mirrors production
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/trial_bronze_setup.sql
-
-# Step 5 — Deploy the dbt project and do an initial run against PROD.
-#           This materialises SILVER + GOLD in PROD so the DEV clone is
-#           realistic (mirrors how the full version works).
-snow dbt deploy SELFHEALING_PROD.CONFIG.SELFHEALING_TEST \
-  --source ./dbt --connection $SNOWFLAKE_CONNECTION_SQL
+snow dbt deploy $DBT_PROJECT --source ./dbt --connection $SNOWFLAKE_CONNECTION_SQL
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
-EXECUTE DBT PROJECT SELFHEALING_PROD.CONFIG.SELFHEALING_TEST
+EXECUTE DBT PROJECT $DBT_PROJECT
   ARGS = 'run --vars \"{db_name: SELFHEALING_PROD}\" --target prod'"
 
-# Step 6 — Seed the registry baseline (run AFTER BRONZE tables exist)
+# Seed registry, drift detector, core task, then harden
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/11_seed_registry.sql
-
-# Step 7 — Deploy the drift detector and core pipeline task
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/12_drift_detector.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/13_pipeline_tasks.sql
-
-# Step 8 — Harden: run the pipeline under the least-privilege role
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/15_run_as_pipeline.sql
 ```
 
-### Simulating a schema change
-
-```bash
-# Simulate Openflow adding a column
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
-ALTER TABLE SELFHEALING_PROD.BRONZE.ORDERS ADD COLUMN discount_code VARCHAR;"
-
-# Run the drift detector manually — detects the change and writes the event
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
-EXECUTE TASK SELFHEALING_PROD.CONFIG.SCHEMA_DRIFT_DETECTOR;"
-
-# Verify the event was detected
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
-SELECT event_id, change_type, table_name, column_name, pipeline_status
-FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS;"
-
-# Run code generation (copy the event_id from the query above)
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
-CALL SELFHEALING_PROD.CONFIG.GENERATE_ARTIFACT_CODE('<event-id>');"
-
-# Run DEV validation locally — opens PR and posts CI result as comment
-python3 config/materialise_in_dev.py <event-id>
-```
-
-The full PR-first flow — PR opened immediately, CI result posted as a comment — still works end-to-end. The only difference from the full version is that the drift detector and GitHub integration run from your laptop rather than being triggered automatically by Snowflake Tasks.
-
-### Full version setup (Enterprise+ with EAI and Openflow)
+### Step 4 — Full account setup (Enterprise+ with EAI and Openflow)
 
 On a full account, the entire pipeline runs inside Snowflake — no local script, no manual steps. Run every script in order:
 
@@ -250,16 +217,14 @@ snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/08_commit_workflow.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/09_pipeline_procs.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/10_poll_merged_prs.sql
 
-# Configure Openflow CDC (see Step 3 below), then seed registry
-# (dbt deploy also populates ARTIFACT_REGISTRY via the on-run-end hook)
+# Configure Openflow CDC (destination DB = PROD, schema = BRONZE, static
+# pattern, CASE_INSENSITIVE). Once BRONZE tables exist with data, continue.
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/11_seed_registry.sql
 
-# Drift detector + full task DAG (14 also grants CREATE DBT PROJECT to the agent)
+# Drift detector + full task DAG, then harden
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/12_drift_detector.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/13_pipeline_tasks.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/14_pipeline_tasks_full.sql
-
-# Harden: run the pipeline under the least-privilege role (after tasks exist)
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/15_run_as_pipeline.sql
 ```
 
@@ -267,126 +232,38 @@ After this, schema changes flowing in through Openflow are detected, code-genera
 
 ---
 
-## Setup guide
+## Running the pipeline
 
-### Step 1 — Fork and configure
-
-1. Fork this repository to your GitHub account — the pipeline will open PRs and post comments to **your fork**, not the original repo
-2. Clone your fork:
-   ```bash
-   git clone https://github.com/<your-username>/selfhealing-demo.git
-   cd selfhealing-demo
-   ```
-3. Set your environment variables — these are required before running any script:
-   ```bash
-   export SNOWFLAKE_CONNECTION_SQL=<your-snow-cli-connection>
-   export SNOWFLAKE_CONNECTION_PY=<your-snow-cli-connection>
-   export GITHUB_REPO=<your-username>/selfhealing-demo
-   export GITHUB_PAT=<your-github-pat>
-   export DBT_PROJECT=<your-dbt-project-fqn>   # e.g. PLATFORM_REGISTRY.DBT.SELFHEALING_TEST
-   ```
-
-### Step 2 — Provision Snowflake infrastructure
-
-> **Trial account?** Scripts 03, 04, 08, 09, and 10 require External Network Access (EAI) which is not available on trial accounts. Follow the **Trial** column below.
-
-| Script | Full | Trial |
-|---|---|---|
-| 01 config schema | ✅ | ✅ |
-| 02 rbac | ✅ | ✅ |
-| 03 github api integration | ✅ | ❌ skip |
-| 04 git integration | ✅ | ❌ skip |
-| 05 dev environment | ✅ | ✅ |
-| 06 impact analysis | ✅ | ✅ |
-| 07 code generation | ✅ | ✅ |
-| 08 commit workflow | ✅ | ❌ skip |
-| 09 pipeline procs | ✅ | ❌ skip |
-| 10 poll merged prs | ✅ | ❌ skip |
-| 13 pipeline tasks (core) | ✅ | ✅ |
-| 14 pipeline tasks full | ✅ | ❌ skip |
+Simulate a schema change and watch it heal. On a **full** account the drift detector and PR steps fire automatically; on **trial** you run them manually as shown.
 
 ```bash
-# 01 — Foundation: CONFIG schema, SCHEMA_REGISTRY, SCHEMA_CHANGE_EVENTS, SETTINGS
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/01_config_schema.sql
-
-# Populate pipeline config from env vars
+# 1. Simulate Openflow adding a column to ORDERS
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
-MERGE INTO SELFHEALING_PROD.CONFIG.SETTINGS t
-USING (SELECT 'github_repo' AS key, '$GITHUB_REPO' AS value
-       UNION ALL
-       SELECT 'dbt_project', '$DBT_PROJECT') s
-ON t.key = s.key
-WHEN MATCHED THEN UPDATE SET t.value = s.value
-WHEN NOT MATCHED THEN INSERT (key, value) VALUES (s.key, s.value);"
+ALTER TABLE SELFHEALING_PROD.BRONZE.ORDERS ADD COLUMN discount_code VARCHAR;"
 
-# 02 — RBAC: agent role + grants
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/02_rbac.sql
-
-# 03 — GitHub API: network rule, EAI, PAT secret  ← FULL VERSION ONLY
+# 2. Run the drift detector — writes a NEW_COLUMN event
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
-CREATE OR REPLACE SECRET SELFHEALING_PROD.CONFIG.GITHUB_PAT
-  TYPE = GENERIC_STRING
-  SECRET_STRING = '$GITHUB_PAT';"
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/03_github_api_integration.sql
+EXECUTE TASK SELFHEALING_PROD.CONFIG.SCHEMA_DRIFT_DETECTOR;"
 
-# 04 — Snowflake native Git repo  ← FULL VERSION ONLY
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/04_git_integration.sql
+# 3. Generate the fix (Cortex regenerates impacted dbt models)
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+CALL SELFHEALING_PROD.CONFIG.GENERATE_NEXT_PENDING();"
 
-# 05–07 — Core stored procedures (trial and full)
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/05_dev_environment.sql
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/06_impact_analysis.sql
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/07_code_generation.sql
+# 4. Grab the event_id and inspect the generated SQL
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+SELECT event_id FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
+ORDER BY detected_at DESC LIMIT 1;"
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+SELECT artifact_name, file_path, generated_sql
+FROM SELFHEALING_PROD.CONFIG.GENERATED_CODE;"
 
-# 08–10 — GitHub integration procedures  ← FULL VERSION ONLY
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/08_commit_workflow.sql
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/09_pipeline_procs.sql
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/10_poll_merged_prs.sql
+# 5. Validate in a DEV clone, open the PR, and post the CI result as a comment
+python3 config/materialise_in_dev.py <event-id>
 ```
 
-### Step 3 — Configure Openflow
+`materialise_in_dev.py` opens the PR immediately (before tests — it's a guaranteed deliverable), zero-copy clones PROD→DEV, runs `dbt run --select source:bronze.<table>+` against the clone, then posts a ✅ or ❌ comment and sets `pipeline_status` to `CI_PASSED` / `CI_FAILED`.
 
-Set up the Openflow PostgreSQL CDC connector targeting your Postgres source:
-- Destination database: your `PROD` database
-- Destination schema: `BRONZE`
-- Destination schema pattern: `BRONZE` (static)
-- Object identifier resolution: `CASE_INSENSITIVE`
-
-Once CDC is running and BRONZE tables exist with data, proceed.
-
-### Step 4 — Deploy the dbt project
-
-```bash
-# Deploy dbt to Snowflake
-snow dbt deploy SELFHEALING_PROD.CONFIG.SELFHEALING \
-  --source ./dbt \
-  --connection <connection>
-
-# This also populates ARTIFACT_REGISTRY via the on-run-end hook
-```
-
-### Step 5 — Seed the schema registry baseline
-
-```bash
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/11_seed_registry.sql
-```
-
-### Step 6 — Start the drift detector and pipeline task
-
-```bash
-# Drift detector — works on trial and full
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/12_drift_detector.sql
-
-# Core pipeline task — works on trial and full
-# Polls for PENDING events every 5 min and calls GENERATE_ARTIFACT_CODE
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/13_pipeline_tasks.sql
-
-# Full DAG tasks — FULL VERSION ONLY
-# Adds automated DEV test + GitHub PR after code generation
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/14_pipeline_tasks_full.sql
-
-# Harden (both versions) — run tasks under the least-privilege role
-snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/15_run_as_pipeline.sql
-```
+---
 
 ## Pipeline status lifecycle
 
@@ -397,44 +274,7 @@ PENDING → GENERATING → PR_OPEN → CI_PASSED
 
 A detected schema change is **always guaranteed to produce a PR** (`PR_OPEN`). The `dbt run` CI test runs after the PR is open and posts its outcome as a comment. A human reviews the PR and the CI comment, then merges. On merge, `SYNC_FROM_MAIN` redeploys the production dbt project.
 
-## Running the pipeline
-
-### Manually trigger a schema change
-
-Add a column to your Postgres source table (or directly to a BRONZE table to simulate), then wait up to 15 minutes for the drift detector, or insert a test event:
-
-```sql
-INSERT INTO SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
-  (table_schema, table_name, column_name, change_type, new_data_type)
-VALUES ('BRONZE', 'ORDERS', 'discount_code', 'NEW_COLUMN', 'TEXT');
-```
-
-### Process the event
-
-```sql
--- Get the event ID
-SELECT event_id FROM SELFHEALING_PROD.CONFIG.PENDING_SCHEMA_CHANGES LIMIT 1;
-
--- Run the pipeline for that event
-CALL SELFHEALING_PROD.CONFIG.GENERATE_ARTIFACT_CODE('<event-id>');
-```
-
-### Validate in DEV and post CI results to the PR
-
-```bash
-GITHUB_PAT=<your-pat> python3 config/materialise_in_dev.py <event-id>
-```
-
-This script:
-1. Opens the PR immediately after writing generated files to disk
-2. Clones PROD to DEV, deploys the generated dbt models
-3. Runs `dbt run --select source:bronze.<table>+` against the DEV clone
-4. Posts a ✅ or ❌ comment to the PR with per-model results
-5. Sets `pipeline_status` to `CI_PASSED` or `CI_FAILED`
-
-The PR is opened regardless of whether dbt passes — it is the deliverable. The CI result informs the reviewer.
-
-### What to look for
+## What to look for
 
 | Event type | Expected model updates |
 |---|---|
