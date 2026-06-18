@@ -293,3 +293,32 @@ def run(session, event_id):
         'changes':     changes,  # full list including generated_sql for stage writes
     }
 $$;
+
+-- -----------------------------------------------------------
+-- GENERATE_NEXT_PENDING
+-- Finds the oldest PENDING event and calls GENERATE_ARTIFACT_CODE.
+-- Called by PIPELINE_ROOT task — avoids scripting blocks in
+-- task body which are incompatible with snow sql -f execution.
+-- Returns NULL if no pending events exist.
+-- -----------------------------------------------------------
+CREATE OR REPLACE PROCEDURE SELFHEALING_PROD.CONFIG.GENERATE_NEXT_PENDING()
+RETURNS VARIANT
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.11'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'run'
+EXECUTE AS CALLER
+AS $$
+def run(session):
+    row = session.sql("""
+        SELECT event_id
+        FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
+        WHERE pipeline_status = 'PENDING'
+        ORDER BY detected_at
+        LIMIT 1
+    """).collect()
+    if not row:
+        return {'status': 'no_pending_events'}
+    event_id = row[0][0]
+    return session.call('SELFHEALING_PROD.CONFIG.GENERATE_ARTIFACT_CODE', event_id)
+$$;
