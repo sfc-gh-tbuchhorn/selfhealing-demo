@@ -49,10 +49,9 @@ GRANT UPDATE ON TABLE SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
 GRANT UPDATE ON TABLE SELFHEALING_PROD.CONFIG.ARTIFACT_REGISTRY
   TO ROLE SELFHEALING_AGENT;
 
--- ── dbt project: only required on full accounts with PLATFORM_REGISTRY ───────
--- Uncomment if running the full version (not trial):
--- GRANT CREATE DBT PROJECT ON SCHEMA PLATFORM_REGISTRY.DBT
---   TO ROLE SELFHEALING_AGENT;
+-- Note: the full version also needs CREATE DBT PROJECT on PLATFORM_REGISTRY.DBT
+-- for the agent role — that grant lives in 14_pipeline_tasks_full.sql so it is
+-- only applied when you set up the full (non-trial) pipeline.
 
 -- ── Warehouse ─────────────────────────────────────────────────
 GRANT USAGE ON WAREHOUSE SELFHEALING_WH
