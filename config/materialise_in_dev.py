@@ -27,7 +27,7 @@ Environment variables (optional — sensible defaults provided):
   GITHUB_PAT                GitHub personal access token    (required for PR + comments)
 """
 
-import subprocess, json, sys, os, re, requests
+import subprocess, json, sys, os, re, base64, requests
 import snowflake.connector
 
 def _require(name):
@@ -52,6 +52,43 @@ def gh_headers(token):
         'Authorization': f'token {token}',
         'Accept': 'application/vnd.github.v3+json',
     }
+
+
+def create_branch(token, branch_name):
+    """Create branch_name from the tip of main (idempotent)."""
+    main = requests.get(
+        f'{GITHUB_API}/repos/{REPO}/git/refs/heads/main',
+        headers=gh_headers(token)
+    )
+    main.raise_for_status()
+    sha = main.json()['object']['sha']
+    r = requests.post(
+        f'{GITHUB_API}/repos/{REPO}/git/refs',
+        headers=gh_headers(token),
+        json={'ref': f'refs/heads/{branch_name}', 'sha': sha}
+    )
+    if r.status_code not in (201, 422):  # 422 = already exists
+        r.raise_for_status()
+
+
+def commit_file_to_branch(token, branch_name, repo_path, content, message):
+    """Create or update a single file on branch_name."""
+    existing = requests.get(
+        f'{GITHUB_API}/repos/{REPO}/contents/{repo_path}',
+        headers=gh_headers(token), params={'ref': branch_name}
+    )
+    body = {
+        'message': message,
+        'content': base64.b64encode(content.encode()).decode(),
+        'branch': branch_name,
+    }
+    if existing.status_code == 200:
+        body['sha'] = existing.json()['sha']
+    r = requests.put(
+        f'{GITHUB_API}/repos/{REPO}/contents/{repo_path}',
+        headers=gh_headers(token), json=body
+    )
+    r.raise_for_status()
 
 
 def open_pr(token, branch_name, change_type, table_name, column_name, artifacts):
@@ -209,22 +246,31 @@ def run(event_id):
     # ── 4. Open PR immediately (PR-first) ─────────────────────
     token  = os.environ.get('GITHUB_PAT', '')
     pr_url = ''
-    if token and branch_name:
-        print(f"\nOpening PR on branch {branch_name}...")
+    if not branch_name:
+        branch_name = f"schema-change/{change_type.lower()}-{table_name}-{column_name or 'newtable'}".rstrip('-')
+    if token:
+        print(f"\nCreating branch {branch_name} and committing files...")
         try:
+            create_branch(token, branch_name)
+            for artifact_name, file_path, generated_sql, action in artifacts:
+                commit_file_to_branch(
+                    token, branch_name, file_path, generated_sql,
+                    f"[self-healing] {change_type} on {table_name}: update {artifact_name}"
+                )
+                print(f"  Committed: {file_path}")
             pr_url = open_pr(token, branch_name, change_type, table_name, column_name, artifacts)
             print(f"  PR opened: {pr_url}")
             pr_url_esc = pr_url.replace("'", "''")
             cur.execute(f"""
                 UPDATE {PROD_DB}.CONFIG.SCHEMA_CHANGE_EVENTS
-                SET pipeline_status = 'PR_OPEN', mr_url = '{pr_url_esc}'
+                SET pipeline_status = 'PR_OPEN', mr_url = '{pr_url_esc}', branch_name = '{branch_name}'
                 WHERE EVENT_ID = '{event_id}'
             """)
             conn.commit()
         except Exception as e:
             print(f"  PR open failed (non-fatal): {e}")
     else:
-        print("  Skipping PR (set GITHUB_PAT env var + ensure branch_name is set)")
+        print("  Skipping PR (set GITHUB_PAT env var)")
 
     # ── 5. Deploy new dbt version ─────────────────────────────
     print("\nDeploying new dbt project version...")
