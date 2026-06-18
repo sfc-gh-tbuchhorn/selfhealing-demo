@@ -146,14 +146,16 @@ def snow_sql(query):
 
 
 def dbt_deploy():
+    # Stream output live (no capture) so the CLI's S3 retry behaviour matches
+    # an interactive run — capturing into pipes can make it hang on transient
+    # stage-upload timeouts.
     result = subprocess.run(
         ["snow", "dbt", "deploy", DBT_PROJECT,
-         "--source", DBT_DIR, "--connection", CONNECTION_SQL],
-        capture_output=True, text=True
+         "--source", DBT_DIR, "--connection", CONNECTION_SQL]
     )
     if result.returncode != 0:
-        raise RuntimeError(f"snow dbt deploy failed:\n{result.stderr[:500]}")
-    print(f"  dbt project deployed: {result.stdout.strip().splitlines()[-1]}")
+        raise RuntimeError("snow dbt deploy failed (see output above)")
+    print("  dbt project deployed")
 
 
 def dbt_run(selector, dev_db):
