@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS SELFHEALING_PROD.CONFIG.ARTIFACT_REGISTRY (
     source_columns  ARRAY,                    -- NULL = whole-table dependency
     artifact_sql    VARCHAR        NOT NULL,  -- current SQL (kept in sync by agent)
     file_path       VARCHAR        NOT NULL,  -- repo path, e.g. models/silver/customers.sql
+    snowflake_fqn   VARCHAR,                  -- output table FQN, e.g. SELFHEALING_PROD.SILVER.ORDERS
     updated_at      TIMESTAMP_NTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP(),
     PRIMARY KEY (artifact_id)
 );
