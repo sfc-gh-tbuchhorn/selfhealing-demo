@@ -21,7 +21,7 @@ USE WAREHOUSE SELFHEALING_WH;
 -- Full-version grant: agent role needs to create the DEV test dbt project.
 -- (Not applied in 02_rbac.sql because PLATFORM_REGISTRY does not exist on trial.)
 GRANT CREATE DBT PROJECT ON SCHEMA PLATFORM_REGISTRY.DBT
-  TO ROLE SELFHEALING_AGENT;
+  TO ROLE SELFHEALING_PIPELINE;
 
 -- Suspend child tasks before recreating root
 ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.COMMIT_AND_MR      SUSPEND;
