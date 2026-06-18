@@ -97,7 +97,7 @@ def post_pr_comment(token, pr_url, body):
     )
     r.raise_for_status()
 
-(query):
+def snow_sql(query):
     result = subprocess.run(
         ["snow", "sql", "-c", CONNECTION_SQL, "--format", "json", "-q", query],
         capture_output=True, text=True
