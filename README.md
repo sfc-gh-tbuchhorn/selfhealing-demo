@@ -91,7 +91,7 @@ Update these in `config/materialise_in_dev.py` and Snow CLI config.
 selfhealing_demo/
 ├── config/                           # Snowflake setup scripts (run locally)
 │   ├── 01_config_schema.sql          # CONFIG schema, SCHEMA_REGISTRY, SCHEMA_CHANGE_EVENTS
-│   ├── 02_rbac.sql                   # SELFHEALING_AGENT role + grants
+│   ├── 02_rbac.sql                   # SELFHEALING_PIPELINE role + grants
 │   ├── 03_github_api_integration.sql # Network rule, EAI, PAT secret for GitHub REST API
 │   ├── 04_git_integration.sql        # Snowflake native Git repo (source of truth for dbt)
 │   ├── 05_dev_environment.sql        # REFRESH_DEV_ENVIRONMENT — zero-copy clone PROD → DEV
@@ -102,7 +102,10 @@ selfhealing_demo/
 │   ├── 10_poll_merged_prs.sql        # Detect merged PRs → SYNC_FROM_MAIN
 │   ├── 11_seed_registry.sql          # Seed SCHEMA_REGISTRY from current BRONZE schema
 │   ├── 12_drift_detector.sql         # SCHEMA_DRIFT_DETECTOR proc
-│   ├── 13_pipeline_tasks.sql         # Scheduled tasks (start automation)
+│   ├── 13_pipeline_tasks.sql         # Core pipeline task (trial + full)
+│   ├── 14_pipeline_tasks_full.sql    # Full task DAG (full version only)
+│   ├── 15_run_as_pipeline.sql        # Harden: run tasks as least-privilege role
+│   ├── trial_bronze_setup.sql        # Trial: BRONZE schema + sample data
 │   ├── materialise_in_dev.py         # Run dbt in DEV, post ✅/❌ result as PR comment
 │   └── refresh_artifact_registry.py  # Populate ARTIFACT_REGISTRY from dbt ls
 │
@@ -185,6 +188,9 @@ snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/11_seed_registry.sql
 # Step 7 — Deploy the drift detector and core pipeline task
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/12_drift_detector.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/13_pipeline_tasks.sql
+
+# Step 8 — Harden: run the pipeline under the least-privilege role
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/15_run_as_pipeline.sql
 ```
 
 ### Simulating a schema change
@@ -252,6 +258,9 @@ snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/11_seed_registry.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/12_drift_detector.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/13_pipeline_tasks.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/14_pipeline_tasks_full.sql
+
+# Harden: run the pipeline under the least-privilege role (after tasks exist)
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/15_run_as_pipeline.sql
 ```
 
 After this, schema changes flowing in through Openflow are detected, code-generated, validated in a DEV clone, and raised as PRs **entirely by Snowflake Tasks** — no local `materialise_in_dev.py` needed. `14_pipeline_tasks_full.sql` replaces the trial `PIPELINE_ROOT` (which only generates code) with the full DAG: `PIPELINE_ROOT` (`GENERATE_AND_PREP`) → `RUN_DEV_TEST` → `COMMIT_AND_MR`, plus `PIPELINE_FINALIZER`.
@@ -374,6 +383,9 @@ snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/13_pipeline_tasks.sql
 # Full DAG tasks — FULL VERSION ONLY
 # Adds automated DEV test + GitHub PR after code generation
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/14_pipeline_tasks_full.sql
+
+# Harden (both versions) — run tasks under the least-privilege role
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/15_run_as_pipeline.sql
 ```
 
 ## Pipeline status lifecycle
