@@ -69,6 +69,25 @@ def restore_ref_calls(original_sql, generated_sql):
     return source_pattern.sub(replace_source_with_ref, generated_sql)
 
 
+def restore_source_calls(original_sql, generated_sql):
+    """
+    Safety net: the LLM often changes the case of source() arguments,
+    e.g. source('bronze','orders') -> source('BRONZE','ORDERS'). dbt
+    source names are case-sensitive, so restore the exact original
+    source() calls keyed on the lowercased table name.
+    """
+    src_pattern = re.compile(r"\{\{\s*source\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"](\w+)['\"]\s*\)\s*\}\}")
+    original_srcs = {m.group(2).lower(): m.group(0) for m in src_pattern.finditer(original_sql)}
+    if not original_srcs:
+        return generated_sql
+
+    def replace_source(m):
+        table = m.group(2).lower()
+        return original_srcs.get(table, m.group(0))
+
+    return src_pattern.sub(replace_source, generated_sql)
+
+
 def cortex_complete(session, prompt):
     """
     Insert prompt into a real staging table (single-quote escaped for SQL),
@@ -251,6 +270,7 @@ def run(session, event_id):
             result = cortex_complete(session, prompt)
             result = restore_config_block(artifact_sql, result)
             result = restore_ref_calls(artifact_sql, result)
+            result = restore_source_calls(artifact_sql, result)
 
             changes.append({
                 'artifact_name': artifact_name,
