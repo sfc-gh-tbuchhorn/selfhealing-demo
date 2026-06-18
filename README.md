@@ -170,10 +170,19 @@ snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/07_code_generation.sql
 #           (replaces Openflow — run AFTER 01 has created the database)
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/trial_bronze_setup.sql
 
-# Step 5 — Seed the registry baseline (must run AFTER BRONZE tables exist)
+# Step 5 — Deploy the dbt project and do an initial run against PROD.
+#           This materialises SILVER + GOLD in PROD so the DEV clone is
+#           realistic (mirrors how the full version works).
+snow dbt deploy SELFHEALING_PROD.CONFIG.SELFHEALING_TEST \
+  --source ./dbt --connection $SNOWFLAKE_CONNECTION_SQL
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+EXECUTE DBT PROJECT SELFHEALING_PROD.CONFIG.SELFHEALING_TEST
+  ARGS = 'run --vars \"{db_name: SELFHEALING_PROD}\" --target prod'"
+
+# Step 6 — Seed the registry baseline (run AFTER BRONZE tables exist)
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/11_seed_registry.sql
 
-# Step 6 — Deploy the drift detector and core pipeline task
+# Step 7 — Deploy the drift detector and core pipeline task
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/12_drift_detector.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/13_pipeline_tasks.sql
 ```
