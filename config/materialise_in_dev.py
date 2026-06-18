@@ -41,6 +41,7 @@ CONNECTION_SQL = _require('SNOWFLAKE_CONNECTION_SQL')
 CONNECTION_PY  = _require('SNOWFLAKE_CONNECTION_PY')
 REPO           = _require('GITHUB_REPO')
 DBT_DIR        = os.environ.get('DBT_DIR', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'dbt'))
+REPO_DBT_PREFIX = os.environ.get('REPO_DBT_PREFIX', 'dbt/')  # path prefix in the repo where the dbt project lives
 DBT_PROJECT    = os.environ.get('DBT_PROJECT', 'PLATFORM_REGISTRY.DBT.SELFHEALING_TEST')
 PROD_DB        = os.environ.get('PROD_DB', 'SELFHEALING_PROD')
 DEV_DB         = os.environ.get('DEV_DB',  'SELFHEALING_DEV')
@@ -254,10 +255,10 @@ def run(event_id):
             create_branch(token, branch_name)
             for artifact_name, file_path, generated_sql, action in artifacts:
                 commit_file_to_branch(
-                    token, branch_name, file_path, generated_sql,
+                    token, branch_name, REPO_DBT_PREFIX + file_path, generated_sql,
                     f"[self-healing] {change_type} on {table_name}: update {artifact_name}"
                 )
-                print(f"  Committed: {file_path}")
+                print(f"  Committed: {REPO_DBT_PREFIX + file_path}")
             pr_url = open_pr(token, branch_name, change_type, table_name, column_name, artifacts)
             print(f"  PR opened: {pr_url}")
             pr_url_esc = pr_url.replace("'", "''")
