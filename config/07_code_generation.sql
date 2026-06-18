@@ -85,7 +85,7 @@ def cortex_complete(session, prompt):
             f"VALUES ('{job_id}', '{escaped}')"
         ).collect()
         result = session.sql(
-            f"SELECT SNOWFLAKE.CORTEX.COMPLETE('{MODEL}', PROMPT) AS RESPONSE "
+            f"SELECT AI_COMPLETE('{MODEL}', PROMPT) AS RESPONSE "
             f"FROM SELFHEALING_PROD.CONFIG.PROMPT_STAGING WHERE JOB_ID = '{job_id}'"
         ).collect()[0]['RESPONSE']
         return result
