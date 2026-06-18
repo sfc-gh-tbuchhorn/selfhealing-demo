@@ -275,7 +275,18 @@ def run(event_id):
     else:
         print("  Skipping PR (set GITHUB_PAT env var)")
 
-    # ── 5. Deploy new dbt version ─────────────────────────────
+    # ── 5. Refresh DEV clone, then deploy new dbt version ─────
+    print("\nRefreshing DEV clone (zero-copy clone of PROD)...")
+    refresh = subprocess.run(
+        ["snow", "sql", "-c", CONNECTION_SQL, "-q",
+         f"CALL {PROD_DB}.CONFIG.REFRESH_DEV_ENVIRONMENT()"],
+        capture_output=True, text=True
+    )
+    if refresh.returncode != 0:
+        print(f"  DEV refresh failed (non-fatal, continuing): {refresh.stderr[:300]}")
+    else:
+        print(f"  DEV clone refreshed: {DEV_DB}")
+
     print("\nDeploying new dbt project version...")
     try:
         dbt_deploy()
