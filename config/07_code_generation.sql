@@ -97,9 +97,9 @@ def cortex_complete(session, prompt):
 
 def store_generated_changes(session, event_id, changes):
     """
-    Store only artifact metadata (not SQL content) in generated_changes.
-    The actual generated SQL is written to the dbt stage by GENERATE_AND_PREP.
-    Keeping it small avoids JSON escaping issues with large SQL strings.
+    Store artifact metadata in generated_changes (small, avoids JSON
+    escaping issues), and write the full generated SQL to the
+    GENERATED_CODE table via a Snowpark DataFrame (clean escaping).
     """
     metadata = [
         {'artifact_name': c['artifact_name'],
@@ -116,6 +116,21 @@ def store_generated_changes(session, event_id, changes):
         WHERE event_id = '{event_id}'
         """
     ).collect()
+
+    # Clear any prior generated code for this event, then write full SQL
+    session.sql(
+        f"DELETE FROM SELFHEALING_PROD.CONFIG.GENERATED_CODE WHERE event_id = '{event_id}'"
+    ).collect()
+    rows = [
+        (event_id, c['artifact_name'], c['file_path'], c['action'], c['generated_sql'])
+        for c in changes if c.get('generated_sql')
+    ]
+    if rows:
+        df = session.create_dataframe(
+            rows,
+            schema=['EVENT_ID', 'ARTIFACT_NAME', 'FILE_PATH', 'ACTION', 'GENERATED_SQL']
+        )
+        df.write.mode('append').save_as_table('SELFHEALING_PROD.CONFIG.GENERATED_CODE')
 
 
 def build_column_prompt(change_type, table_name, column_name,
