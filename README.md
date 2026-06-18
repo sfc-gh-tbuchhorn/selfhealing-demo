@@ -213,6 +213,49 @@ python3 config/materialise_in_dev.py <event-id>
 
 The full PR-first flow — PR opened immediately, CI result posted as a comment — still works end-to-end. The only difference from the full version is that the drift detector and GitHub integration run from your laptop rather than being triggered automatically by Snowflake Tasks.
 
+### Full version setup (Enterprise+ with EAI and Openflow)
+
+On a full account, the entire pipeline runs inside Snowflake — no local script, no manual steps. Run every script in order:
+
+```bash
+# Foundation + config
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/01_config_schema.sql
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+MERGE INTO SELFHEALING_PROD.CONFIG.SETTINGS t
+USING (SELECT 'github_repo' AS key, '$GITHUB_REPO' AS value
+       UNION ALL SELECT 'dbt_project', '$DBT_PROJECT') s
+ON t.key = s.key
+WHEN MATCHED THEN UPDATE SET t.value = s.value
+WHEN NOT MATCHED THEN INSERT (key, value) VALUES (s.key, s.value);"
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/02_rbac.sql
+
+# GitHub API + native Git (require EAI)
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+CREATE OR REPLACE SECRET SELFHEALING_PROD.CONFIG.GITHUB_PAT
+  TYPE = GENERIC_STRING SECRET_STRING = '$GITHUB_PAT';"
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/03_github_api_integration.sql
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/04_git_integration.sql
+
+# Stored procedures
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/05_dev_environment.sql
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/06_impact_analysis.sql
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/07_code_generation.sql
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/08_commit_workflow.sql
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/09_pipeline_procs.sql
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/10_poll_merged_prs.sql
+
+# Configure Openflow CDC (see Step 3 below), then seed registry
+# (dbt deploy also populates ARTIFACT_REGISTRY via the on-run-end hook)
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/11_seed_registry.sql
+
+# Drift detector + full task DAG (14 also grants CREATE DBT PROJECT to the agent)
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/12_drift_detector.sql
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/13_pipeline_tasks.sql
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/14_pipeline_tasks_full.sql
+```
+
+After this, schema changes flowing in through Openflow are detected, code-generated, validated in a DEV clone, and raised as PRs **entirely by Snowflake Tasks** — no local `materialise_in_dev.py` needed. `14_pipeline_tasks_full.sql` replaces the trial `PIPELINE_ROOT` (which only generates code) with the full DAG: `PIPELINE_ROOT` (`GENERATE_AND_PREP`) → `RUN_DEV_TEST` → `COMMIT_AND_MR`, plus `PIPELINE_FINALIZER`.
+
 ---
 
 ## Setup guide
