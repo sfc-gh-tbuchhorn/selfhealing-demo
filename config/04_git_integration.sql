@@ -59,6 +59,12 @@ LANGUAGE SQL
 EXECUTE AS OWNER
 AS
 $$
+DECLARE
+    events_cur CURSOR FOR
+        SELECT event_id
+        FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
+        WHERE branch_name = :pr_branch
+          AND pipeline_status <> 'RESOLVED';
 BEGIN
     -- Pull latest commits from GitHub (including merged main)
     ALTER GIT REPOSITORY SELFHEALING_PROD.CONFIG.SELFHEALING_REPO FETCH;
@@ -67,26 +73,13 @@ BEGIN
     CREATE OR REPLACE DBT PROJECT PLATFORM_REGISTRY.DBT.SELFHEALING
         FROM @SELFHEALING_PROD.CONFIG.SELFHEALING_REPO/branches/main/;
 
-    -- Advance SCHEMA_REGISTRY for any NEW_COLUMN events on this branch
-    INSERT INTO SELFHEALING_PROD.CONFIG.SCHEMA_REGISTRY (table_schema, table_name, column_name, data_type)
-        SELECT e.table_schema, e.table_name, e.column_name, e.new_data_type
-        FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS e
-        WHERE e.branch_name  = :pr_branch
-          AND e.change_type  = 'NEW_COLUMN'
-          AND e.new_data_type IS NOT NULL
-          AND NOT EXISTS (
-              SELECT 1 FROM SELFHEALING_PROD.CONFIG.SCHEMA_REGISTRY r
-              WHERE r.table_schema = e.table_schema
-                AND r.table_name   = e.table_name
-                AND r.column_name  = e.column_name
-          );
-
-    -- Mark event resolved
-    UPDATE SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
-    SET    status          = 'RESOLVED',
-           pipeline_status = 'RESOLVED',
-           resolved_at     = CURRENT_TIMESTAMP()
-    WHERE  branch_name = :pr_branch;
+    -- Advance SCHEMA_REGISTRY + mark resolved for every event on this branch.
+    -- Delegates to RESOLVE_EVENT so all four change types are handled with a
+    -- single, shared implementation (NEW_COLUMN insert, COLUMN_DROP delete,
+    -- TYPE_CHANGE update, NEW_TABLE insert-all).
+    FOR rec IN events_cur DO
+        CALL SELFHEALING_PROD.CONFIG.RESOLVE_EVENT(rec.event_id);
+    END FOR;
 
     RETURN 'Synced from main and resolved branch: ' || :pr_branch;
 END;
