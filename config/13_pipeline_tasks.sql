@@ -3,8 +3,8 @@
 -- Core pipeline task — works on trial and full accounts.
 --
 -- PIPELINE_ROOT polls for PENDING schema change events every
--- 5 minutes. If a PENDING event exists it calls
--- GENERATE_ARTIFACT_CODE to generate updated dbt models.
+-- 5 minutes and calls GENERATE_NEXT_PENDING which finds the
+-- oldest PENDING event and runs GENERATE_ARTIFACT_CODE.
 -- No EAI or PLATFORM_REGISTRY required.
 --
 -- After this task fires, run materialise_in_dev.py locally
@@ -23,18 +23,6 @@ CREATE OR REPLACE TASK SELFHEALING_PROD.CONFIG.PIPELINE_ROOT
     WAREHOUSE = SELFHEALING_WH
     SCHEDULE  = '5 MINUTE'
 AS
-DECLARE
-    v_event_id VARCHAR;
-BEGIN
-    SELECT event_id INTO :v_event_id
-    FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
-    WHERE pipeline_status = 'PENDING'
-    ORDER BY detected_at
-    LIMIT 1;
-
-    IF (v_event_id IS NOT NULL) THEN
-        CALL SELFHEALING_PROD.CONFIG.GENERATE_ARTIFACT_CODE(:v_event_id);
-    END IF;
-END;
+    CALL SELFHEALING_PROD.CONFIG.GENERATE_NEXT_PENDING();
 
 ALTER TASK SELFHEALING_PROD.CONFIG.PIPELINE_ROOT RESUME;
