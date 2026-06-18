@@ -95,3 +95,16 @@ CREATE TABLE IF NOT EXISTS SELFHEALING_PROD.CONFIG.PROMPT_STAGING (
     job_id  VARCHAR NOT NULL,
     prompt  VARCHAR NOT NULL
 );
+
+-- Generated code — full regenerated SQL per artifact, written by
+-- GENERATE_ARTIFACT_CODE and consumed by materialise_in_dev.py.
+CREATE TABLE IF NOT EXISTS SELFHEALING_PROD.CONFIG.GENERATED_CODE (
+    event_id       VARCHAR        NOT NULL,
+    artifact_name  VARCHAR        NOT NULL,
+    file_path      VARCHAR        NOT NULL,
+    action         VARCHAR        NOT NULL,
+    generated_sql  VARCHAR        NOT NULL,
+    test_status    VARCHAR,
+    test_error     VARCHAR,
+    generated_at   TIMESTAMP_NTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP()
+);
