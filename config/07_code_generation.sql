@@ -121,16 +121,14 @@ def store_generated_changes(session, event_id, changes):
     session.sql(
         f"DELETE FROM SELFHEALING_PROD.CONFIG.GENERATED_CODE WHERE event_id = '{event_id}'"
     ).collect()
-    rows = [
-        (event_id, c['artifact_name'], c['file_path'], c['action'], c['generated_sql'])
-        for c in changes if c.get('generated_sql')
-    ]
-    if rows:
-        df = session.create_dataframe(
-            rows,
-            schema=['EVENT_ID', 'ARTIFACT_NAME', 'FILE_PATH', 'ACTION', 'GENERATED_SQL']
-        )
-        df.write.mode('append').save_as_table('SELFHEALING_PROD.CONFIG.GENERATED_CODE')
+    for c in changes:
+        if c.get('generated_sql'):
+            session.sql(
+                "INSERT INTO SELFHEALING_PROD.CONFIG.GENERATED_CODE "
+                "(event_id, artifact_name, file_path, action, generated_sql) "
+                "VALUES (?, ?, ?, ?, ?)",
+                params=[event_id, c['artifact_name'], c['file_path'], c['action'], c['generated_sql']]
+            ).collect()
 
 
 def build_column_prompt(change_type, table_name, column_name,
