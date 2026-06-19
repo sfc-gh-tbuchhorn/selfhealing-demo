@@ -1,7 +1,8 @@
-import psycopg2, uuid, random, datetime, sys
+import os, psycopg2, uuid, random, datetime, sys
 
-PG_HOST = "gxlnixonmzblpkn7wyegesvry4.sfseapac-au-demo92.ap-southeast-2.aws.postgres.snowflake.app"
-CONN_STR = f"host={PG_HOST} port=5432 dbname=postgres user=application sslmode=require"
+PG_HOST = os.environ["PG_HOST"]
+PG_USER = os.environ.get("PG_USER", "application")
+CONN_STR = f"host={PG_HOST} port=5432 dbname=postgres user={PG_USER} sslmode=require"
 
 N_CUSTOMERS   = 500
 N_ORDERS      = 2000
