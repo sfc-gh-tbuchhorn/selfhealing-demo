@@ -64,9 +64,11 @@ BEGIN
     -- Pull latest commits from GitHub (including merged main)
     ALTER GIT REPOSITORY SELFHEALING_PROD.CONFIG.SELFHEALING_REPO FETCH;
 
-    -- Redeploy PROD dbt project — always reflects exact state of main
+    -- Redeploy PROD dbt project — always reflects exact state of main.
+    -- The dbt project lives in the repo's dbt/ subdirectory (dbt_project.yml
+    -- must be at the FROM path root), so point at branches/main/dbt/.
     CREATE OR REPLACE DBT PROJECT PLATFORM_REGISTRY.DBT.SELFHEALING
-        FROM @SELFHEALING_PROD.CONFIG.SELFHEALING_REPO/branches/main/;
+        FROM @SELFHEALING_PROD.CONFIG.SELFHEALING_REPO/branches/main/dbt/;
 
     -- Advance SCHEMA_REGISTRY + mark resolved for every event on this branch.
     -- Delegates to RESOLVE_EVENT so all four change types are handled with a
