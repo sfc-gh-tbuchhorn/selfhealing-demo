@@ -152,11 +152,14 @@ def run(session):
     # Commit each generated file to the feature branch
     change_type = gen_result.get('change_type', '')
     for change in generated_changes:
-        path     = change['file_path']
-        content  = change['generated_sql']
-        msg      = f"schema({change_type.lower()}): update {path}"
-        existing = file_sha(token, path, branch_name)
-        commit_file(token, path, content, branch_name, msg, existing)
+        # ARTIFACT_REGISTRY stores paths relative to the dbt/ subdirectory
+        # (e.g. "models/silver/orders.sql"), but the repo root has the dbt
+        # project under dbt/, so the full repo path needs the prefix.
+        repo_path = 'dbt/' + change['file_path']
+        content   = change['generated_sql']
+        msg       = f"schema({change_type.lower()}): update {repo_path}"
+        existing  = file_sha(token, repo_path, branch_name)
+        commit_file(token, repo_path, content, branch_name, msg, existing)
 
     # ── Open PR immediately (PR-first: PR is the guaranteed deliverable) ────
     table_name  = rows[0]['TABLE_NAME']
