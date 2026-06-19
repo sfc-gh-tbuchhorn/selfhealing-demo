@@ -74,7 +74,7 @@ When `BRONZE.ORDERS` changes, the recursive CTE returns `SILVER.ORDERS` (depth 1
 | GitHub account + PAT | `repo` scope |
 | Python 3.8+ | `snowflake-connector-python`, `requests`, `snow` CLI |
 | Openflow connector | **Full version only** — Snowflake-native PostgreSQL CDC. On trial, replaced by `trial_bronze_setup.sql` |
-| `PLATFORM_REGISTRY.DBT` | **Full version only** — the dbt project registry. On trial, the dbt project lives in your own schema |
+| dbt project location | The dbt project object lives in `SELFHEALING_PROD.CONFIG` (set via `DBT_PROJECT`). No `PLATFORM_REGISTRY` needed |
 
 Connections and repo are configured entirely through environment variables (see [Setup — start here](#setup--start-here-both-paths)) — no file edits required.
 
@@ -146,7 +146,7 @@ Complete this once, regardless of account type. Then follow **one** of the two s
    export SNOWFLAKE_CONNECTION_PY=<your-snow-cli-connection>
    export GITHUB_REPO=<your-username>/selfhealing-demo
    export GITHUB_PAT=<your-github-pat>
-   export DBT_PROJECT=SELFHEALING_PROD.CONFIG.SELFHEALING   # any unused FQN
+   export DBT_PROJECT=SELFHEALING_PROD.CONFIG.SELFHEALING   # full version: keep this exact value (see note below)
    ```
 
 ### Trial vs full at a glance
@@ -205,6 +205,8 @@ Then simulate a change and watch it heal — see [Running the pipeline](#running
 ## Full account setup
 
 > **Self-contained path.** Assumes you've completed [Setup — start here](#setup--start-here-both-paths). Enterprise+ account with EAI and Openflow. The entire pipeline runs inside Snowflake — no local `materialise_in_dev.py`, no manual resolution step.
+
+> ⚠️ **Keep `DBT_PROJECT = SELFHEALING_PROD.CONFIG.SELFHEALING` for the full version.** The `RUN_DEV_TEST` task runs `EXECUTE DBT PROJECT <name>` and a task body cannot read `CONFIG.SETTINGS`, so the project name is hardcoded in `14_pipeline_tasks_full.sql`. It must match `SETTINGS.dbt_project` (which the setup populates from `$DBT_PROJECT`). If you want a different name, change it in **both** `$DBT_PROJECT` and `14`'s `RUN_DEV_TEST`/`15`'s rebuild block.
 
 ### Prerequisite: PostgreSQL source + Openflow CDC
 
