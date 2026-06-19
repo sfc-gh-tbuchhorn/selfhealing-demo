@@ -1,0 +1,26 @@
+name: Sync Snowflake on PR Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+jobs:
+  sync:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call SYNC_FROM_MAIN
+        run: |
+          curl -sf -X POST \
+            "https://${{ secrets.SNOWFLAKE_ACCOUNT }}.snowflakecomputing.com/api/v2/statements" \
+            -H "Authorization: Bearer ${{ secrets.SNOWFLAKE_PAT }}" \
+            -H "X-Snowflake-Authorization-Token-Type: PROGRAMMATIC_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "statement": "CALL SELFHEALING_PROD.CONFIG.SYNC_FROM_MAIN('"'"'${{ github.head_ref }}'"'"')",
+              "warehouse": "SELFHEALING_WH",
+              "database": "SELFHEALING_PROD",
+              "schema":   "CONFIG"
+            }'
