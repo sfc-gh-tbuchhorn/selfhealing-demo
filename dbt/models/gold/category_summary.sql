@@ -1,3 +1,10 @@
+{{
+  config(
+    database = var('db_name'),
+    schema   = 'GOLD'
+  )
+}}
+
 SELECT
     oi.PRODUCT_NAME,
     COUNT(DISTINCT oi.ITEM_ID)          AS items_sold,
