@@ -358,6 +358,25 @@ MODEL = 'llama3.1-70b'   # change to any Cortex-available model
 
 Replace the `SCHEMA_DRIFT_DETECTOR` task with a subscription to your OpenMetadata change feed. The event schema (`SCHEMA_CHANGE_EVENTS`) is compatible with either approach.
 
+## Teardown
+
+Remove everything created by the demo:
+
+```bash
+# 1. Drop all Snowflake objects (databases, warehouse, role, integrations)
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/teardown.sql
+
+# 2. Remove the local clone
+cd .. && rm -rf selfhealing-demo
+```
+
+3. On GitHub: close any open PRs and delete the `schema-change/*` branches on your fork — or simply delete the fork.
+
+> **Re-running without a full teardown?** A passing run leaves the generated changes in your local dbt models (`materialise_in_dev.py` only reverts on failure). Before re-testing against a freshly seeded BRONZE, reset them so they don't reference columns that no longer exist:
+> ```bash
+> git restore dbt/models/
+> ```
+
 ## Licence
 
 MIT
