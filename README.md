@@ -98,7 +98,9 @@ selfhealing_demo/
 │   ├── 13_pipeline_tasks.sql         # Core pipeline task (trial + full)
 │   ├── 14_pipeline_tasks_full.sql    # Full task DAG (full version only)
 │   ├── 15_run_as_pipeline.sql        # Harden: run tasks as least-privilege role
+│   ├── 16_resolve_event.sql          # RESOLVE_EVENT — advance SCHEMA_REGISTRY after merge
 │   ├── trial_bronze_setup.sql        # Trial: BRONZE schema + sample data
+│   ├── postgres_source_setup.sql     # Full: retail schema/tables/publication on the Postgres source
 │   ├── materialise_in_dev.py         # Run dbt in DEV, post ✅/❌ result as PR comment
 │   └── refresh_artifact_registry.py  # Populate ARTIFACT_REGISTRY from dbt ls
 │
@@ -204,6 +206,56 @@ Then simulate a change and watch it heal — see [Running the pipeline](#running
 
 > **Self-contained path.** Assumes you've completed [Setup — start here](#setup--start-here-both-paths). Enterprise+ account with EAI and Openflow. The entire pipeline runs inside Snowflake — no local `materialise_in_dev.py`, no manual resolution step.
 
+### Prerequisite: PostgreSQL source + Openflow CDC
+
+The full version replaces `trial_bronze_setup.sql` with live CDC. **Set this up before running the scripts below** — the dbt deploy and `11_seed_registry.sql` expect populated `BRONZE` tables.
+
+1. **Provision a PostgreSQL source.** Either use an existing PostgreSQL (`wal_level=logical`) or create a Snowflake Postgres instance:
+   ```sql
+   CREATE POSTGRES INSTANCE selfhealing_pg
+     COMPUTE_FAMILY = 'STANDARD_M' STORAGE_SIZE_GB = 10
+     AUTHENTICATION_AUTHORITY = POSTGRES;
+   -- Save the returned `application` + `snowflake_admin` passwords to ~/.pgpass.
+   -- Attach a network policy with MODE = POSTGRES_INGRESS allowing your IP.
+   ```
+2. **Create the source schema, tables, and publication** (see [`config/postgres_source_setup.sql`](config/postgres_source_setup.sql) for the full file, including the columns the dbt models expect and the `snowflake_admin` REPLICATION grant):
+   ```bash
+   psql "host=<host> port=5432 dbname=postgres user=application sslmode=require" \
+        -f config/postgres_source_setup.sql
+   psql "host=<host> port=5432 dbname=postgres user=snowflake_admin sslmode=require" \
+        -c "ALTER ROLE application REPLICATION;"
+   python3 load_retail_data.py        # load sample data
+   ```
+3. **Prepare the BRONZE landing zone.** Create the schema and grant the Openflow runtime role ownership (CDC creates the tables dynamically):
+   ```sql
+   CREATE SCHEMA IF NOT EXISTS SELFHEALING_PROD.BRONZE;
+   GRANT OWNERSHIP ON SCHEMA SELFHEALING_PROD.BRONZE
+     TO ROLE <openflow_runtime_role> COPY CURRENT GRANTS;
+   GRANT USAGE ON DATABASE SELFHEALING_PROD TO ROLE <openflow_runtime_role>;
+   GRANT USAGE ON WAREHOUSE SELFHEALING_WH  TO ROLE <openflow_runtime_role>;
+   ```
+   Add the Postgres `host:5432` to the egress network rule of an EAI attached to your Openflow runtime.
+4. **Deploy the Openflow PostgreSQL CDC connector** with these settings (the rest are defaults):
+
+   | Context | Parameter | Value |
+   |---|---|---|
+   | Source | `PostgreSQL Connection URL` | `jdbc:postgresql://<host>:5432/postgres?sslmode=require` |
+   | Source | `PostgreSQL Username` / `Password` | `application` / *(its password)* |
+   | Source | `Publication Name` **and** `PostgreSQL Publication Name` | `selfhealing_pub` (set **both**) |
+   | Source | `PostgreSQL Source Tables` | `retail.customers,retail.orders,retail.order_items` |
+   | Destination | `Destination Database` **and** `Snowflake Destination Database` | `SELFHEALING_PROD` (set **both**) |
+   | Destination | `Destination Schema Pattern` | `BRONZE` (static — **not** `${source.schema.name}`) |
+   | Destination | `Snowflake Warehouse` / `Snowflake Role` | `SELFHEALING_WH` / `<openflow_runtime_role>` |
+   | Destination | `Snowflake Account Identifier` | org-account form, e.g. `MYORG-MYACCOUNT` |
+   | Ingestion | `Object Identifier Resolution` | `CASE_INSENSITIVE` |
+   | Ingestion | `Included Table Names` | `retail.customers,retail.orders,retail.order_items` |
+
+   Start the connector and confirm rows land before continuing:
+   ```bash
+   snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+   SELECT COUNT(*) FROM SELFHEALING_PROD.BRONZE.CUSTOMERS;"
+   ```
+
 **Merge detection.** When a PR is merged, `SYNC_FROM_MAIN` must run to redeploy PROD and re-baseline. Pick one:
 - **Polling (default, no GitHub Actions needed):** `10_poll_merged_prs.sql` creates `POLL_MERGED_PRS_TASK`, which polls GitHub *from inside Snowflake* (via EAI) every 5 min and calls `SYNC_FROM_MAIN` on merged PRs. Works even where GitHub Actions can't reach Snowflake (e.g. VPN/network restrictions).
 - **Push (optional):** the included `.github/workflows/sync_snowflake_on_merge.yml` calls `SYNC_FROM_MAIN` via the Snowflake SQL API on merge. Requires GitHub repo secrets `SNOWFLAKE_ACCOUNT` and `SNOWFLAKE_PAT`, and that GitHub's runners can reach your Snowflake account. If they can't, delete the workflow and rely on polling.
@@ -242,8 +294,8 @@ snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/08_commit_workflow.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/09_pipeline_procs.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/10_poll_merged_prs.sql
 
-# Configure Openflow CDC (destination DB = PROD, schema = BRONZE, static
-# pattern, CASE_INSENSITIVE). Once BRONZE tables exist with data, continue.
+# BRONZE is now populated by Openflow CDC (see the prerequisite above).
+# Confirm row counts > 0 before continuing.
 
 # Deploy the dbt project from the Git repo and do an initial PROD run.
 # This creates the DBT PROJECT object (required by RUN_DEV_TEST) and
