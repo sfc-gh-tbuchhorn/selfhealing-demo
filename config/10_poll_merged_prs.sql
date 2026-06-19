@@ -57,9 +57,11 @@ def run(session):
     for row in rows:
         branch = row['BRANCH_NAME']
         if is_merged(token, branch):
-            session.sql(
-                "CALL SELFHEALING_PROD.CONFIG.SYNC_FROM_MAIN('" + branch + "')"
-            ).collect()
+            # Use session.call() rather than session.sql('CALL ...').collect():
+            # collecting a CALL result whose single column is the proc name
+            # ('SYNC_FROM_MAIN') trips a Snowpark "existing quoted column
+            # identifiers" error. session.call() invokes the proc cleanly.
+            session.call('SELFHEALING_PROD.CONFIG.SYNC_FROM_MAIN', branch)
             synced.append(branch)
 
     if synced:
