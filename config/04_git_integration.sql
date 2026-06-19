@@ -99,6 +99,11 @@ $$;
 GRANT USAGE ON PROCEDURE SELFHEALING_PROD.CONFIG.SYNC_FROM_MAIN(VARCHAR)
   TO ROLE SELFHEALING_PIPELINE;
 
--- Grant read access to the git repository for agent role
+-- Grant read access to the git repository for the pipeline role.
+-- READ on the repo + USAGE on its API integration are BOTH required: the
+-- pipeline-role tasks (GENERATE_AND_PREP) read the repo / CREATE DBT PROJECT
+-- from it, and that access is evaluated against the executing (task) role.
 GRANT READ ON GIT REPOSITORY SELFHEALING_PROD.CONFIG.SELFHEALING_REPO
+  TO ROLE SELFHEALING_PIPELINE;
+GRANT USAGE ON INTEGRATION GITHUB_GIT_API_INTEGRATION
   TO ROLE SELFHEALING_PIPELINE;
