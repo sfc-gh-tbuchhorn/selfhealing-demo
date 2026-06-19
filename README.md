@@ -302,7 +302,7 @@ snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/10_poll_merged_prs.sql
 # populates SILVER/GOLD in PROD so the DEV clone is realistic.
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
 CREATE OR REPLACE DBT PROJECT $DBT_PROJECT
-    FROM @SELFHEALING_PROD.CONFIG.SELFHEALING_REPO/branches/main/;"
+    FROM @SELFHEALING_PROD.CONFIG.SELFHEALING_REPO/branches/main/dbt/;"
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
 EXECUTE DBT PROJECT $DBT_PROJECT
     ARGS = 'run --vars \"{db_name: SELFHEALING_PROD}\" --target prod'"
