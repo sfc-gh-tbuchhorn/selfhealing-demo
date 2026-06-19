@@ -201,21 +201,8 @@ _Results will be posted as a comment below._
         r.raise_for_status()
         pr_url = r.json()['html_url']
 
-    # Fetch Git repo so Snowflake sees the new branch content
-    session.sql(
-        f'ALTER GIT REPOSITORY {GIT_REPO} FETCH'
-    ).collect()
-
-    # Deploy SELFHEALING_TEST from the feature branch.
-    # Branch names with slashes need quoting: /branches/"schema-change/xxx"/
-    # The dbt project lives in the repo's dbt/ subdirectory, so the path ends
-    # in /dbt/ (dbt_project.yml must be at the FROM path root).
-    session.sql(
-        f'CREATE OR REPLACE DBT PROJECT {TEST_PROJECT} '
-        f'FROM @{GIT_REPO}/branches/"{branch_name}"/dbt/'
-    ).collect()
-
-    # Store PR URL and mark ready for testing
+    # Store PR URL and mark ready immediately — PR-first guarantee means the
+    # event is always reflected as PR_OPEN before any CI prep can fail.
     pr_url_esc = pr_url.replace("'", "''")
     session.sql(f"""
         UPDATE SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
@@ -223,6 +210,20 @@ _Results will be posted as a comment below._
             mr_url          = '{pr_url_esc}'
         WHERE event_id = '{event_id}'
     """).collect()
+
+    # Fetch Git repo so Snowflake sees the new branch content
+    session.sql(
+        f'ALTER GIT REPOSITORY {GIT_REPO} FETCH'
+    ).collect()
+
+    # Deploy TEST_PROJECT from the feature branch (used by RUN_DEV_TEST task).
+    # Branch names with slashes need quoting: /branches/"schema-change/xxx"/
+    # The dbt project lives in the repo's dbt/ subdirectory, so the path ends
+    # in /dbt/ (dbt_project.yml must be at the FROM path root).
+    session.sql(
+        f'CREATE OR REPLACE DBT PROJECT {TEST_PROJECT} '
+        f'FROM @{GIT_REPO}/branches/"{branch_name}"/dbt/'
+    ).collect()
 
     return f'PR opened: {pr_url} — event {event_id} ready for dbt CI'
 $$;
