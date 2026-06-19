@@ -201,11 +201,13 @@ _Results will be posted as a comment below._
         f'ALTER GIT REPOSITORY {GIT_REPO} FETCH'
     ).collect()
 
-    # Deploy SELFHEALING_TEST from the feature branch
+    # Deploy SELFHEALING_TEST from the feature branch.
     # Branch names with slashes need quoting: /branches/"schema-change/xxx"/
+    # The dbt project lives in the repo's dbt/ subdirectory, so the path ends
+    # in /dbt/ (dbt_project.yml must be at the FROM path root).
     session.sql(
         f'CREATE OR REPLACE DBT PROJECT {TEST_PROJECT} '
-        f'FROM @{GIT_REPO}/branches/"{branch_name}"/'
+        f'FROM @{GIT_REPO}/branches/"{branch_name}"/dbt/'
     ).collect()
 
     # Store PR URL and mark ready for testing
