@@ -55,12 +55,8 @@ EXECUTE AS OWNER
 AS
 $$
 DECLARE
-    events_cur CURSOR FOR
-        SELECT event_id
-        FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
-        WHERE branch_name = :pr_branch
-          AND pipeline_status <> 'RESOLVED';
-    dbt_proj STRING;
+    dbt_proj   STRING;
+    events_res RESULTSET;
 BEGIN
     -- Pull latest commits from GitHub (including merged main)
     ALTER GIT REPOSITORY SELFHEALING_PROD.CONFIG.SELFHEALING_REPO FETCH;
@@ -88,8 +84,21 @@ BEGIN
     -- Delegates to RESOLVE_EVENT so all four change types are handled with a
     -- single, shared implementation (NEW_COLUMN insert, COLUMN_DROP delete,
     -- TYPE_CHANGE update, NEW_TABLE insert-all).
-    FOR rec IN events_cur DO
-        CALL SELFHEALING_PROD.CONFIG.RESOLVE_EVENT(rec.event_id);
+    -- Use a RESULTSET (binds :pr_branch at assignment) rather than a CURSOR
+    -- with a bind variable — a FOR-loop over a bind-cursor does not bind the
+    -- parameter and fails with "Bind variable :pr_branch not set".
+    events_res := (
+        SELECT event_id
+        FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
+        WHERE branch_name = :pr_branch
+          AND pipeline_status <> 'RESOLVED'
+    );
+    FOR rec IN events_res DO
+        -- Assign the loop column to a local var and bind it — a loop
+        -- variable cannot be referenced directly (rec.event_id) as a CALL
+        -- argument ("invalid identifier 'REC.EVENT_ID'").
+        LET v_event_id STRING := rec.event_id;
+        CALL SELFHEALING_PROD.CONFIG.RESOLVE_EVENT(:v_event_id);
     END FOR;
 
     RETURN 'Synced from main and resolved branch: ' || :pr_branch;
