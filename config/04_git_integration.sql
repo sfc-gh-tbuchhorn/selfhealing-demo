@@ -60,15 +60,29 @@ DECLARE
         FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
         WHERE branch_name = :pr_branch
           AND pipeline_status <> 'RESOLVED';
+    dbt_proj STRING;
 BEGIN
     -- Pull latest commits from GitHub (including merged main)
     ALTER GIT REPOSITORY SELFHEALING_PROD.CONFIG.SELFHEALING_REPO FETCH;
 
+    -- Resolve the dbt project name from CONFIG.SETTINGS (same key the setup
+    -- sequence populates), so this always matches the project the tasks use.
+    -- MAX() returns a single NULL row when the key is absent (avoids a
+    -- no-data error); fall back to the registry default if unset.
+    SELECT MAX(value) INTO :dbt_proj
+    FROM SELFHEALING_PROD.CONFIG.SETTINGS
+    WHERE key = 'dbt_project';
+
+    IF (dbt_proj IS NULL) THEN
+        dbt_proj := 'PLATFORM_REGISTRY.DBT.SELFHEALING';
+    END IF;
+
     -- Redeploy PROD dbt project — always reflects exact state of main.
     -- The dbt project lives in the repo's dbt/ subdirectory (dbt_project.yml
     -- must be at the FROM path root), so point at branches/main/dbt/.
-    CREATE OR REPLACE DBT PROJECT PLATFORM_REGISTRY.DBT.SELFHEALING
-        FROM @SELFHEALING_PROD.CONFIG.SELFHEALING_REPO/branches/main/dbt/;
+    EXECUTE IMMEDIATE
+        'CREATE OR REPLACE DBT PROJECT ' || dbt_proj ||
+        ' FROM @SELFHEALING_PROD.CONFIG.SELFHEALING_REPO/branches/main/dbt/';
 
     -- Advance SCHEMA_REGISTRY + mark resolved for every event on this branch.
     -- Delegates to RESOLVE_EVENT so all four change types are handled with a
