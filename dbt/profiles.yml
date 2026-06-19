@@ -5,5 +5,5 @@ selfhealing:
       type:      snowflake
       database:  SELFHEALING_PROD
       schema:    PUBLIC
-      role:      ACCOUNTADMIN
+      role:      SELFHEALING_PIPELINE
       warehouse: SELFHEALING_WH
