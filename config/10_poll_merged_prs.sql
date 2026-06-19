@@ -14,7 +14,7 @@ AS $$
 import _snowflake, requests
 
 GITHUB_API = 'https://api.github.com'
-REPO       = 'sfc-gh-tbuchhorn/selfhealing_demo'
+REPO       = 'your-username/selfhealing-demo'  # overridden from CONFIG.SETTINGS at runtime
 
 
 def gh_headers(token):
@@ -26,22 +26,26 @@ def gh_headers(token):
 
 
 def is_merged(token, branch_name):
+    owner = REPO.split('/')[0]
     r = requests.get(
         f'{GITHUB_API}/repos/{REPO}/pulls',
         headers=gh_headers(token),
-        params={'head': f'sfc-gh-tbuchhorn:{branch_name}', 'state': 'closed'}
+        params={'head': f'{owner}:{branch_name}', 'state': 'closed'}
     )
     prs = r.json() if r.ok else []
     return any(pr.get('merged_at') for pr in prs)
 
 
 def run(session):
+    global REPO
+    REPO = ({r[0]: r[1] for r in session.sql('SELECT key, value FROM SELFHEALING_PROD.CONFIG.SETTINGS').collect()}).get('github_repo', REPO)
+
     token = _snowflake.get_generic_secret_string('github_token')
 
     rows = session.sql("""
         SELECT event_id, branch_name
         FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
-        WHERE pipeline_status = 'MR_OPEN'
+        WHERE pipeline_status IN ('PR_OPEN', 'CI_PASSED', 'CI_FAILED')
           AND branch_name IS NOT NULL
         ORDER BY detected_at ASC
     """).collect()
