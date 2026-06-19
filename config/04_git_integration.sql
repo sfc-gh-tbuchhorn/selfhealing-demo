@@ -22,17 +22,12 @@ CREATE OR REPLACE API INTEGRATION GITHUB_GIT_API_INTEGRATION
     ENABLED                  = TRUE;
 
 -- -----------------------------------------------------------
--- Git credentials secret (PASSWORD type required for GIT REPOSITORY)
--- Username = GitHub username; password = GitHub PAT.
--- Populate after running:
---   ALTER SECRET SELFHEALING_PROD.CONFIG.GITHUB_GIT_CREDENTIALS
---     SET USERNAME = 'sfc-gh-tbuchhorn'
---         PASSWORD = '<your_pat_here>';
+-- Git credentials secret (PASSWORD type, required for GIT REPOSITORY).
+-- Created from env vars in the setup sequence (inline `snow sql -q`,
+-- which gets shell interpolation — a `-f` file like this one cannot
+-- read $GITHUB_PAT). See README "Full account setup". This file
+-- assumes SELFHEALING_PROD.CONFIG.GITHUB_GIT_CREDENTIALS already exists.
 -- -----------------------------------------------------------
-CREATE SECRET IF NOT EXISTS SELFHEALING_PROD.CONFIG.GITHUB_GIT_CREDENTIALS
-    TYPE     = PASSWORD
-    USERNAME = 'sfc-gh-tbuchhorn'
-    PASSWORD = 'REPLACE_WITH_PAT';
 
 -- -----------------------------------------------------------
 -- Git Repository object — mirrors sfc-gh-tbuchhorn/selfhealing_demo
