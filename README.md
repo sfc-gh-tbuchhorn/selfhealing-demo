@@ -143,6 +143,9 @@ selfhealing_demo/
    export GITHUB_PAT=<your-github-pat>
    export DBT_PROJECT=SELFHEALING_PROD.CONFIG.SELFHEALING   # any unused FQN
    ```
+4. **Full version — merge detection.** When a PR is merged, `SYNC_FROM_MAIN` must run to redeploy PROD and re-baseline. There are two ways to trigger it; pick one:
+   - **Polling (default, no GitHub Actions needed):** `10_poll_merged_prs.sql` creates `POLL_MERGED_PRS_TASK`, which polls GitHub *from inside Snowflake* (via EAI) every 5 min and calls `SYNC_FROM_MAIN` on merged PRs. Works even where GitHub Actions can't reach Snowflake (e.g. VPN/network restrictions).
+   - **Push (optional):** the included `.github/workflows/sync_snowflake_on_merge.yml` calls `SYNC_FROM_MAIN` via the Snowflake SQL API on merge. Requires GitHub repo secrets `SNOWFLAKE_ACCOUNT` and `SNOWFLAKE_PAT`, and that GitHub's runners can reach your Snowflake account. If they can't, delete the workflow and rely on polling.
 
 ### Step 2 — Trial vs full account
 
@@ -222,6 +225,17 @@ snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/10_poll_merged_prs.sql
 
 # Configure Openflow CDC (destination DB = PROD, schema = BRONZE, static
 # pattern, CASE_INSENSITIVE). Once BRONZE tables exist with data, continue.
+
+# Deploy the dbt project from the Git repo and do an initial PROD run.
+# This creates the DBT PROJECT object (required by RUN_DEV_TEST) and
+# populates SILVER/GOLD in PROD so the DEV clone is realistic.
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+CREATE OR REPLACE DBT PROJECT $DBT_PROJECT
+    FROM @SELFHEALING_PROD.CONFIG.SELFHEALING_REPO/branches/main/;"
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+EXECUTE DBT PROJECT $DBT_PROJECT
+    ARGS = 'run --vars \"{db_name: SELFHEALING_PROD}\" --target prod'"
+
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/11_seed_registry.sql
 
 # Drift detector + full task DAG, then harden
