@@ -70,13 +70,13 @@ When `BRONZE.ORDERS` changes, the recursive CTE returns `SILVER.ORDERS` (depth 1
 
 | Requirement | Notes |
 |---|---|
-| Snowflake account | Cortex LLM enabled; `llama3.1-70b` accessible. Trial accounts need a payment method on file for Cortex (see Step 2) |
+| Snowflake account | Cortex LLM enabled; `llama3.1-70b` accessible. Trial accounts need a payment method on file for Cortex (see [Trial vs full at a glance](#trial-vs-full-at-a-glance)) |
 | GitHub account + PAT | `repo` scope |
 | Python 3.8+ | `snowflake-connector-python`, `requests`, `snow` CLI |
 | Openflow connector | **Full version only** — Snowflake-native PostgreSQL CDC. On trial, replaced by `trial_bronze_setup.sql` |
 | `PLATFORM_REGISTRY.DBT` | **Full version only** — the dbt project registry. On trial, the dbt project lives in your own schema |
 
-Connections and repo are configured entirely through environment variables (see Setup Step 1) — no file edits required.
+Connections and repo are configured entirely through environment variables (see [Setup — start here](#setup--start-here-both-paths)) — no file edits required.
 
 ## Repo structure
 
@@ -125,9 +125,12 @@ selfhealing_demo/
 └── load_order_items.py
 ```
 
-## Setup
+## Setup — start here (both paths)
 
-### Step 1 — Fork, clone, and set environment variables
+Complete this once, regardless of account type. Then follow **one** of the two self-contained paths below — they are **alternatives, not sequential steps**:
+
+- **[Trial account setup](#trial-account-setup)** — no EAI, no Openflow; the GitHub work runs locally.
+- **[Full account setup](#full-account-setup)** — Enterprise+ with EAI and Openflow; the whole pipeline runs inside Snowflake.
 
 1. **Fork** this repository — the pipeline opens PRs and posts comments to **your fork**, not the original.
 2. **Clone** your fork:
@@ -143,24 +146,25 @@ selfhealing_demo/
    export GITHUB_PAT=<your-github-pat>
    export DBT_PROJECT=SELFHEALING_PROD.CONFIG.SELFHEALING   # any unused FQN
    ```
-4. **Full version — merge detection.** When a PR is merged, `SYNC_FROM_MAIN` must run to redeploy PROD and re-baseline. There are two ways to trigger it; pick one:
-   - **Polling (default, no GitHub Actions needed):** `10_poll_merged_prs.sql` creates `POLL_MERGED_PRS_TASK`, which polls GitHub *from inside Snowflake* (via EAI) every 5 min and calls `SYNC_FROM_MAIN` on merged PRs. Works even where GitHub Actions can't reach Snowflake (e.g. VPN/network restrictions).
-   - **Push (optional):** the included `.github/workflows/sync_snowflake_on_merge.yml` calls `SYNC_FROM_MAIN` via the Snowflake SQL API on merge. Requires GitHub repo secrets `SNOWFLAKE_ACCOUNT` and `SNOWFLAKE_PAT`, and that GitHub's runners can reach your Snowflake account. If they can't, delete the workflow and rely on polling.
 
-### Step 2 — Trial vs full account
+### Trial vs full at a glance
 
-This demo runs on a trial account with two substitutions. The table below shows which scripts run on each path.
-
-| Blocked on trial | Used for | Trial substitution |
+| Capability | Trial | Full |
 |---|---|---|
-| **External network access (EAI)** | Stored procs calling the GitHub REST API | Skip `03`, `04`, `08`, `09`, `10`, `14`; `materialise_in_dev.py` does the GitHub work locally |
-| **Openflow** | Streaming Postgres CDC into BRONZE | `trial_bronze_setup.sql` seeds BRONZE with sample data |
+| Source → BRONZE | `trial_bronze_setup.sql` seeds sample data | Openflow PostgreSQL CDC streams live changes |
+| GitHub REST calls (commit/PR/comment) | Run locally by `materialise_in_dev.py` | Run inside Snowflake via EAI |
+| Merge → re-baseline | `RESOLVE_EVENT` run manually | `SYNC_FROM_MAIN` via polling task or GitHub Action |
+| Scripts used | all **except** `03, 04, 08, 09, 10, 14` | all scripts |
 
 > **Cortex needs a payment method on trial.** Snowflake Cortex LLM functions are blocked on trial accounts until you add a credit card (Admin → Billing → Add Credit Card). You keep your free credits, but the code-generation step fails without it.
 
-### Step 3 — Trial account setup
+---
 
-Run in this order (skips the EAI/Openflow scripts):
+## Trial account setup
+
+> **Self-contained path.** Assumes you've completed [Setup — start here](#setup--start-here-both-paths). No EAI or Openflow — `trial_bronze_setup.sql` stands in for the CDC source and `materialise_in_dev.py` does the GitHub work locally. Skips scripts `03`, `04`, `08`, `09`, `10`, `14`.
+
+Run in this order:
 
 ```bash
 # Foundation
@@ -192,9 +196,19 @@ snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/15_run_as_pipeline.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/16_resolve_event.sql
 ```
 
-### Step 4 — Full account setup (Enterprise+ with EAI and Openflow)
+Then simulate a change and watch it heal — see [Running the pipeline](#running-the-pipeline).
 
-On a full account, the entire pipeline runs inside Snowflake — no local script, no manual steps. Run every script in order:
+---
+
+## Full account setup
+
+> **Self-contained path.** Assumes you've completed [Setup — start here](#setup--start-here-both-paths). Enterprise+ account with EAI and Openflow. The entire pipeline runs inside Snowflake — no local `materialise_in_dev.py`, no manual resolution step.
+
+**Merge detection.** When a PR is merged, `SYNC_FROM_MAIN` must run to redeploy PROD and re-baseline. Pick one:
+- **Polling (default, no GitHub Actions needed):** `10_poll_merged_prs.sql` creates `POLL_MERGED_PRS_TASK`, which polls GitHub *from inside Snowflake* (via EAI) every 5 min and calls `SYNC_FROM_MAIN` on merged PRs. Works even where GitHub Actions can't reach Snowflake (e.g. VPN/network restrictions).
+- **Push (optional):** the included `.github/workflows/sync_snowflake_on_merge.yml` calls `SYNC_FROM_MAIN` via the Snowflake SQL API on merge. Requires GitHub repo secrets `SNOWFLAKE_ACCOUNT` and `SNOWFLAKE_PAT`, and that GitHub's runners can reach your Snowflake account. If they can't, delete the workflow and rely on polling.
+
+Run every script in order:
 
 ```bash
 # Foundation + config
