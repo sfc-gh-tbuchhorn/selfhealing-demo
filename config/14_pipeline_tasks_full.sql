@@ -18,9 +18,9 @@
 USE DATABASE SELFHEALING_PROD;
 USE WAREHOUSE SELFHEALING_WH;
 
--- Full-version grant: agent role needs to create the DEV test dbt project.
--- (Not applied in 02_rbac.sql because PLATFORM_REGISTRY does not exist on trial.)
-GRANT CREATE DBT PROJECT ON SCHEMA PLATFORM_REGISTRY.DBT
+-- Full-version grant: the pipeline role creates the DEV-test dbt project
+-- (GENERATE_AND_PREP) in SELFHEALING_PROD.CONFIG. No PLATFORM_REGISTRY needed.
+GRANT CREATE DBT PROJECT ON SCHEMA SELFHEALING_PROD.CONFIG
   TO ROLE SELFHEALING_PIPELINE;
 
 -- Suspend child tasks before recreating root
@@ -41,7 +41,10 @@ CREATE OR REPLACE TASK SELFHEALING_PROD.CONFIG.RUN_DEV_TEST
     WAREHOUSE = SELFHEALING_WH
     AFTER     SELFHEALING_PROD.CONFIG.PIPELINE_ROOT
 AS
-    EXECUTE DBT PROJECT PLATFORM_REGISTRY.DBT.SELFHEALING_TEST
+    -- Must match the project GENERATE_AND_PREP creates (= SETTINGS.dbt_project
+    -- = $DBT_PROJECT). A task body can't read SETTINGS, so this name is fixed:
+    -- keep $DBT_PROJECT = SELFHEALING_PROD.CONFIG.SELFHEALING for the full version.
+    EXECUTE DBT PROJECT SELFHEALING_PROD.CONFIG.SELFHEALING
         ARGS = 'run --vars "{db_name: SELFHEALING_DEV}" --target prod';
 
 -- -----------------------------------------------------------
