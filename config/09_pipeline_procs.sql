@@ -138,8 +138,8 @@ def run(session):
     # Always branch from main — Git handles conflicts at review time
     branch_name = f"schema-change/{event_id[:8]}"
 
-    # Create feature branch off base
-    sha = branch_sha(token, base)
+    # Create feature branch off the base branch
+    sha = branch_sha(token, BASE_BRANCH)
     create_branch(token, branch_name, sha)
 
     # Store branch_name immediately for idempotency
