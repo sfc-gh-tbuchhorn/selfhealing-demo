@@ -1,3 +1,10 @@
+{{
+  config(
+    database = var('db_name'),
+    schema   = 'SILVER'
+  )
+}}
+
 SELECT
     ITEM_ID,
     ORDER_ID,
