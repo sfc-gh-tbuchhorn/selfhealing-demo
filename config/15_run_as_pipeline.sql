@@ -25,6 +25,12 @@ GRANT USAGE ON DATABASE  SELFHEALING_PROD           TO ROLE SELFHEALING_PIPELINE
 GRANT USAGE ON SCHEMA    SELFHEALING_PROD.CONFIG    TO ROLE SELFHEALING_PIPELINE;
 GRANT USAGE ON SCHEMA    SELFHEALING_PROD.BRONZE    TO ROLE SELFHEALING_PIPELINE;
 
+-- The pipeline role re-creates the DAG edges (full version) under its own
+-- ownership after the transfer below, and (full) creates the DEV-test dbt
+-- project at runtime — so it needs CREATE TASK and CREATE DBT PROJECT.
+GRANT CREATE TASK        ON SCHEMA SELFHEALING_PROD.CONFIG TO ROLE SELFHEALING_PIPELINE;
+GRANT CREATE DBT PROJECT ON SCHEMA SELFHEALING_PROD.CONFIG TO ROLE SELFHEALING_PIPELINE;
+
 -- Read PROD schema metadata + data for impact analysis / drift detection
 GRANT SELECT ON ALL TABLES    IN SCHEMA SELFHEALING_PROD.BRONZE TO ROLE SELFHEALING_PIPELINE;
 GRANT SELECT ON FUTURE TABLES IN SCHEMA SELFHEALING_PROD.BRONZE TO ROLE SELFHEALING_PIPELINE;
@@ -76,9 +82,56 @@ $$;
 -- ── Make the role assumable by admins ─────────────────────────
 GRANT ROLE SELFHEALING_PIPELINE TO ROLE SYSADMIN;
 
--- ── Resume tasks under the new owner (leaf-to-root) ───────────
+-- ── Rebuild DAG edges + resume, AS the pipeline role ──────────
+-- Transferring task ownership one-by-one (above) severs the AFTER/FINALIZE
+-- edges of a task DAG: Snowflake requires every task in a DAG to share one
+-- owner, and the intermediate mixed-owner state drops the predecessor and
+-- finalizer links (the tasks become bare and cannot be resumed). So we now
+-- switch to the pipeline role — which owns all the tasks post-transfer — and
+-- re-create the edges, then resume leaf-to-root.
+USE ROLE SELFHEALING_PIPELINE;
+USE WAREHOUSE SELFHEALING_WH;
+
+-- Full version only: re-create RUN_DEV_TEST → COMMIT_AND_MR and the finalizer.
+-- Guarded on RUN_DEV_TEST existing, so the trial path (which has none of these
+-- tasks, nor the COMMIT_TO_GITHUB / HANDLE_TEST_FAILURE procs) skips it.
+EXECUTE IMMEDIATE $$
+DECLARE
+    full_dag INT;
+BEGIN
+    SHOW TASKS LIKE 'RUN_DEV_TEST' IN SCHEMA SELFHEALING_PROD.CONFIG;
+    full_dag := (SELECT COUNT(*) FROM TABLE(RESULT_SCAN(LAST_QUERY_ID())));
+    IF (full_dag > 0) THEN
+        -- Suspend before re-creating (root must be suspended to alter its DAG).
+        ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.PIPELINE_FINALIZER SUSPEND;
+        ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.COMMIT_AND_MR      SUSPEND;
+        ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.RUN_DEV_TEST       SUSPEND;
+        ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.PIPELINE_ROOT      SUSPEND;
+        CREATE OR REPLACE TASK SELFHEALING_PROD.CONFIG.RUN_DEV_TEST
+            WAREHOUSE = SELFHEALING_WH
+            AFTER     SELFHEALING_PROD.CONFIG.PIPELINE_ROOT
+        AS
+            EXECUTE DBT PROJECT SELFHEALING_PROD.CONFIG.SELFHEALING
+                ARGS = 'run --vars "{db_name: SELFHEALING_DEV}" --target prod';
+        CREATE OR REPLACE TASK SELFHEALING_PROD.CONFIG.COMMIT_AND_MR
+            WAREHOUSE = SELFHEALING_WH
+            AFTER     SELFHEALING_PROD.CONFIG.RUN_DEV_TEST
+        AS
+            CALL SELFHEALING_PROD.CONFIG.COMMIT_TO_GITHUB();
+        CREATE OR REPLACE TASK SELFHEALING_PROD.CONFIG.PIPELINE_FINALIZER
+            WAREHOUSE = SELFHEALING_WH
+            FINALIZE  = SELFHEALING_PROD.CONFIG.PIPELINE_ROOT
+        AS
+            CALL SELFHEALING_PROD.CONFIG.HANDLE_TEST_FAILURE();
+    END IF;
+END;
+$$;
+
+-- Resume leaf-to-root (as the pipeline role, which owns the tasks + has EXECUTE TASK)
 ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.PIPELINE_FINALIZER  RESUME;
 ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.COMMIT_AND_MR       RESUME;
 ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.RUN_DEV_TEST        RESUME;
 ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.PIPELINE_ROOT       RESUME;
 ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.SCHEMA_DRIFT_DETECTOR RESUME;
+
+USE ROLE ACCOUNTADMIN;
