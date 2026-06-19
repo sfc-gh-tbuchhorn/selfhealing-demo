@@ -209,9 +209,14 @@ WHEN NOT MATCHED THEN INSERT (key, value) VALUES (s.key, s.value);"
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/02_rbac.sql
 
 # GitHub API + native Git (require EAI)
+# Both secrets are created inline so they pick up $GITHUB_PAT / $GITHUB_REPO
+# from your shell (a `-f` file cannot read env vars; `-q` gets interpolation).
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
 CREATE OR REPLACE SECRET SELFHEALING_PROD.CONFIG.GITHUB_PAT
   TYPE = GENERIC_STRING SECRET_STRING = '$GITHUB_PAT';"
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+CREATE OR REPLACE SECRET SELFHEALING_PROD.CONFIG.GITHUB_GIT_CREDENTIALS
+  TYPE = PASSWORD USERNAME = '${GITHUB_REPO%%/*}' PASSWORD = '$GITHUB_PAT';"
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/03_github_api_integration.sql
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -f config/04_git_integration.sql
 
