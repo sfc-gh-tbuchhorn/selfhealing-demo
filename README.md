@@ -325,7 +325,62 @@ After this, schema changes flowing in through Openflow are detected, code-genera
 
 ## Running the pipeline
 
-Simulate a schema change and watch it heal. On a **full** account the drift detector and PR steps fire automatically; on **trial** you run them manually as shown.
+Simulate a schema change and watch it heal. The **full** version is driven by a real source change flowing through Openflow CDC, and the Snowflake Tasks do the rest automatically. The **trial** version simulates the change directly on BRONZE and runs the steps manually.
+
+### Full version (Openflow CDC)
+
+You change the **Postgres source** — Openflow replicates it to BRONZE, and the scheduled tasks detect, regenerate, validate, and open the PR with no local script.
+
+```bash
+PGHOST=<your-postgres-host>
+
+# 1. Add a column at the SOURCE, and touch some rows so CDC flushes promptly
+psql "host=$PGHOST port=5432 dbname=postgres user=application sslmode=require" \
+  -c "ALTER TABLE retail.orders ADD COLUMN discount_code VARCHAR(50);"
+psql "host=$PGHOST port=5432 dbname=postgres user=application sslmode=require" \
+  -c "UPDATE retail.orders SET discount_code='LAUNCH10'
+      WHERE order_id IN (SELECT order_id FROM retail.orders LIMIT 5);"
+
+# 2. Wait for Openflow CDC to replicate the new column into BRONZE (~1–2 min).
+#    Re-run until DISCOUNT_CODE appears:
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+SELECT COLUMN_NAME FROM SELFHEALING_PROD.INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA='BRONZE' AND TABLE_NAME='ORDERS' ORDER BY ORDINAL_POSITION;"
+```
+
+From here the pipeline is automatic: `SCHEMA_DRIFT_DETECTOR` (scheduled) writes a `NEW_COLUMN` event, and `PIPELINE_ROOT` (every 5 min) runs `GENERATE_AND_PREP` → `RUN_DEV_TEST` → `COMMIT_AND_MR`, opening the PR. To trigger it immediately instead of waiting for the schedule, run the tasks as their owner role:
+
+```bash
+# Detect drift now
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+USE ROLE SELFHEALING_PIPELINE;
+EXECUTE TASK SELFHEALING_PROD.CONFIG.SCHEMA_DRIFT_DETECTOR;"
+
+# Run the full generate → dev-test → PR DAG now (also fires PIPELINE_FINALIZER)
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+USE ROLE SELFHEALING_PIPELINE;
+EXECUTE TASK SELFHEALING_PROD.CONFIG.PIPELINE_ROOT;"
+```
+
+Watch it progress (a PR appears on your fork automatically — no `materialise_in_dev.py`):
+
+```bash
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+SELECT event_id, change_type, object_name, pipeline_status, mr_url, detected_at
+FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
+ORDER BY detected_at DESC LIMIT 5;"
+```
+
+**Merge and re-baseline.** Review the PR + CI comment, then **merge** it. `POLL_MERGED_PRS_TASK` (every 5 min) detects the merge and calls `SYNC_FROM_MAIN`, which redeploys the PROD dbt project from `main` and advances `SCHEMA_REGISTRY` → status `RESOLVED`. To trigger immediately (this task is owned by ACCOUNTADMIN):
+
+```bash
+snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+EXECUTE TASK SELFHEALING_PROD.CONFIG.POLL_MERGED_PRS_TASK;"
+```
+
+### Trial version (no Openflow)
+
+On trial you simulate the change directly on BRONZE and drive the steps by hand:
 
 ```bash
 # 1. Simulate Openflow adding a column to ORDERS
@@ -354,9 +409,7 @@ python3 config/materialise_in_dev.py <event-id>
 
 `materialise_in_dev.py` opens the PR immediately (before tests — it's a guaranteed deliverable), zero-copy clones PROD→DEV, runs `dbt run --select source:bronze.<table>+` against the clone, then posts a ✅ or ❌ comment and sets `pipeline_status` to `CI_PASSED` / `CI_FAILED`.
 
-### 6. Merge and re-baseline
-
-Review the PR and CI comment, then **merge** it. On a full account a GitHub Action calls `SYNC_FROM_MAIN` to advance the baseline automatically. On **trial**, run the resolution step manually after merging — this advances `SCHEMA_REGISTRY` to include the change and marks the event `RESOLVED`, so the drift detector stops re-flagging it:
+**Merge and re-baseline.** Review the PR and CI comment, then **merge** it. On trial there is no merge-detection task, so run the resolution step manually after merging — it advances `SCHEMA_REGISTRY` to include the change and marks the event `RESOLVED`, so the drift detector stops re-flagging it:
 
 ```bash
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
