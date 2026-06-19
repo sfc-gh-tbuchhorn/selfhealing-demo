@@ -42,7 +42,9 @@ GITHUB_API   = 'https://api.github.com'
 REPO         = 'your-username/selfhealing-demo'
 BASE_BRANCH  = 'main'
 GIT_REPO     = 'SELFHEALING_PROD.CONFIG.SELFHEALING_REPO'
-TEST_PROJECT = 'PLATFORM_REGISTRY.DBT.SELFHEALING_TEST'
+# Default DEV-test dbt project. Overridden by SETTINGS.dbt_project at runtime.
+# Must match the project RUN_DEV_TEST (14) executes — keep them aligned.
+TEST_PROJECT = 'SELFHEALING_PROD.CONFIG.SELFHEALING'
 
 
 def gh_headers(token):
