@@ -366,7 +366,7 @@ Watch it progress (a PR appears on your fork automatically — no `materialise_i
 
 ```bash
 snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
-SELECT event_id, change_type, object_name, pipeline_status, mr_url, detected_at
+SELECT event_id, change_type, table_name, column_name, pipeline_status, mr_url, detected_at
 FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
 ORDER BY detected_at DESC LIMIT 5;"
 ```
@@ -497,6 +497,19 @@ MODEL = 'llama3.1-70b'   # change to any Cortex-available model
 ### Live OpenMetadata integration
 
 Replace the `SCHEMA_DRIFT_DETECTOR` task with a subscription to your OpenMetadata change feed. The event schema (`SCHEMA_CHANGE_EVENTS`) is compatible with either approach.
+
+## Limitations and scope
+
+This is a proof of concept for the pattern **drift → AI regeneration → PR-first → human gate**, scoped to BRONZE→SILVER→GOLD **table-materialized models**. Know these before applying the pattern in production:
+
+- **LLM non-determinism.** The same schema change can produce different regenerated SQL across runs (restructured logic, aliases, column order). This is *why* the pipeline never auto-merges — every change is gated by both a `dbt run` against a zero-copy PROD clone **and** human PR review. Generation runs at `temperature 0` and deterministic post-processors restore the `{{ config() }}`, `{{ ref() }}`, and `{{ source() }}` wiring, but semantic correctness remains a human responsibility.
+- **GOLD aggregation intent is not inferred.** A new numeric column (e.g. `SHIPPING_FEE`) is passed through SILVER correctly, but may be added to a GOLD model as a raw dimension (`o.SHIPPING_FEE`) rather than an aggregate (`SUM(o.SHIPPING_FEE) AS total_shipping_fee`). The LLM does not infer measure-vs-dimension intent — review GOLD changes carefully.
+- **Column renames are not correlated.** A rename surfaces as a `COLUMN_DROP` + `NEW_COLUMN` (two events, two PRs). There is no logic to recognise they are the same column, so semantic continuity (and data history) is not preserved across a rename.
+- **Incremental models are not handled.** Only `table` materialization is supported. Incremental models need `on_schema_change` handling (`append_new_columns`, `sync_all_columns`, …) and `is_incremental()`-aware regeneration.
+- **Only `models/` are regenerated.** `ARTIFACT_REGISTRY` tracks dbt models. Changes affecting snapshots, seeds, macros, or analyses are not detected or regenerated.
+- **Concurrent changes are processed sequentially.** `PIPELINE_ROOT` handles one `PENDING` event at a time. If two changes occur close together, the second PR's SQL can be stale relative to a `main` that already merged the first. The DEV-clone `dbt run` catches outright breakage but not silent staleness — regenerate against latest `main` if PRs overlap.
+
+**Column-level docs/tests are maintained.** `schema.yml` is kept in sync: a `NEW_COLUMN` adds a documented column entry to the affected SILVER model, and a `COLUMN_DROP` removes the column (and its tests) so `dbt test` does not fail on columns that no longer exist. (Type changes leave `schema.yml` structurally unchanged.)
 
 ## Teardown
 
