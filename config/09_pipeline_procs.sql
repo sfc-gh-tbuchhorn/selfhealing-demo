@@ -30,7 +30,7 @@ CREATE OR REPLACE PROCEDURE SELFHEALING_PROD.CONFIG.GENERATE_AND_PREP()
 RETURNS VARCHAR
 LANGUAGE PYTHON
 RUNTIME_VERSION = '3.11'
-PACKAGES = ('snowflake-snowpark-python', 'requests')
+PACKAGES = ('snowflake-snowpark-python', 'requests', 'pyyaml')
 HANDLER = 'run'
 EXTERNAL_ACCESS_INTEGRATIONS = (GITHUB_EAI)
 SECRETS = ('github_token' = SELFHEALING_PROD.CONFIG.GITHUB_PAT)
@@ -100,6 +100,55 @@ def commit_file(token, path, content, branch, message, existing_sha=None):
     r.raise_for_status()
 
 
+def maintain_schema_yml(token, change_type, table_name, column_name, branch):
+    """Deterministically keep dbt/models/schema.yml in sync with column changes.
+
+    NEW_COLUMN  -> add a documented column entry to the matching SILVER model.
+    COLUMN_DROP -> remove the column (and any tests on it) so dbt test stays valid.
+    Only the SILVER model whose name matches the source table is touched (GOLD
+    models aggregate, so a raw column is not added there). Deterministic (no LLM).
+    """
+    import yaml
+    path = 'dbt/models/schema.yml'
+    r = requests.get(
+        f'{GITHUB_API}/repos/{REPO}/contents/{path}',
+        headers=gh_headers(token), params={'ref': branch}
+    )
+    if r.status_code != 200:
+        return  # no schema.yml in the project — nothing to maintain
+    meta = r.json()
+    doc = yaml.safe_load(base64.b64decode(meta['content']).decode()) or {}
+    models = doc.get('models', [])
+    model_name = table_name.lower()      # SILVER model name == source table name
+    col = column_name.upper()
+    changed = False
+    for m in models:
+        if str(m.get('name', '')).lower() != model_name:
+            continue
+        cols = m.get('columns') or []
+        present = [str(c.get('name', '')).upper() for c in cols]
+        if change_type == 'NEW_COLUMN' and col not in present:
+            cols.append({
+                'name': col,
+                'description': f'Column added to {table_name} by schema drift; review/extend tests as needed.'
+            })
+            m['columns'] = cols
+            changed = True
+        elif change_type == 'COLUMN_DROP':
+            kept = [c for c in cols if str(c.get('name', '')).upper() != col]
+            if len(kept) != len(cols):
+                m['columns'] = kept
+                changed = True
+    if not changed:
+        return
+    new_yaml = yaml.safe_dump(doc, sort_keys=False, default_flow_style=False, width=1000)
+    commit_file(
+        token, path, new_yaml, branch,
+        f'schema({change_type.lower()}): sync schema.yml for {model_name}.{col}',
+        meta['sha']
+    )
+
+
 def run(session):
     global REPO, TEST_PROJECT
     _s = {r[0]: r[1] for r in session.sql('SELECT key, value FROM SELFHEALING_PROD.CONFIG.SETTINGS').collect()}
@@ -164,6 +213,15 @@ def run(session):
     # ── Open PR immediately (PR-first: PR is the guaranteed deliverable) ────
     table_name  = rows[0]['TABLE_NAME']
     column_name = gen_result.get('column_name', '')
+
+    # Keep schema.yml (column-level docs/tests) in sync. Defensive: a failure
+    # here must never block the PR, so it is best-effort and swallows errors.
+    try:
+        if change_type in ('NEW_COLUMN', 'COLUMN_DROP') and column_name:
+            maintain_schema_yml(token, change_type, table_name, column_name, branch_name)
+    except Exception as e:
+        print('schema.yml maintenance skipped:', e)
+
     artifact_list = [
         f"- `{c['artifact_name']}` ({c['action']})"
         for c in generated_changes
