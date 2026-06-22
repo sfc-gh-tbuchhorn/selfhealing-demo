@@ -164,7 +164,7 @@ def dbt_run(selector, dev_db):
         f"EXECUTE DBT PROJECT {DBT_PROJECT} "
         f"ARGS = 'run --select {selector} "
         f"--vars \"{{db_name: {dev_db}}}\" "
-        f"--target prod'"
+        f"--target dev'"
     )
     result = subprocess.run(
         ["snow", "sql", "-c", CONNECTION_SQL, "-q", query],
