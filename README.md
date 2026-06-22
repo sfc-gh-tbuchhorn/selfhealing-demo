@@ -409,6 +409,13 @@ python3 config/materialise_in_dev.py <event-id>
 
 `materialise_in_dev.py` opens the PR immediately (before tests — it's a guaranteed deliverable), zero-copy clones PROD→DEV, runs `dbt run --select source:bronze.<table>+` against the clone, then posts a ✅ or ❌ comment and sets `pipeline_status` to `CI_PASSED` / `CI_FAILED`.
 
+> **Simulating a dropped column on trial.** Don't physically `DROP COLUMN` — that produces no event. Openflow CDC never physically drops a column; it *renames* it to `<col>__SNOWFLAKE_DELETED` (a soft-delete marker), and the drift detector keys off that suffix. To reproduce a `COLUMN_DROP` on trial, add the marker column instead, then run steps 2–5 above with the resulting event:
+> ```bash
+> snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+> ALTER TABLE SELFHEALING_PROD.BRONZE.ORDERS ADD COLUMN \"DISCOUNT_CODE__SNOWFLAKE_DELETED\" VARCHAR;"
+> ```
+> The detector raises a `COLUMN_DROP` event for `DISCOUNT_CODE`, and `GENERATE_NEXT_PENDING` regenerates the impacted models with the column removed.
+
 **Merge and re-baseline.** Review the PR and CI comment, then **merge** it. On trial there is no merge-detection task, so run the resolution step manually after merging — it advances `SCHEMA_REGISTRY` to include the change and marks the event `RESOLVED`, so the drift detector stops re-flagging it:
 
 ```bash
