@@ -45,7 +45,7 @@ AS
     -- = $DBT_PROJECT). A task body can't read SETTINGS, so this name is fixed:
     -- keep $DBT_PROJECT = SELFHEALING_PROD.CONFIG.SELFHEALING for the full version.
     EXECUTE DBT PROJECT SELFHEALING_PROD.CONFIG.SELFHEALING
-        ARGS = 'run --vars "{db_name: SELFHEALING_DEV}" --target prod';
+        ARGS = 'run --vars "{db_name: SELFHEALING_DEV}" --target dev';
 
 -- -----------------------------------------------------------
 -- COMMIT_AND_MR: open GitHub PR after dbt passes
