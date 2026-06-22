@@ -52,6 +52,22 @@ def clean_llm_output(text):
     return t
 
 
+def extract_model_sql(text):
+    """
+    Robustly extract a dbt model from possibly-chatty LLM output:
+    take the first fenced code block if present, then start at the first
+    {{ ... }} (config block) so any prose preamble is dropped.
+    """
+    t = text.strip()
+    m = re.search(r'```[a-zA-Z]*\n(.*?)```', t, re.DOTALL)
+    if m:
+        t = m.group(1).strip()
+    idx = t.find('{{')
+    if idx > 0:
+        t = t[idx:]
+    return t.strip()
+
+
 def restore_config_block(original_sql, generated_sql):
     if generated_sql.strip().startswith('{{'):
         return generated_sql
@@ -315,7 +331,7 @@ def run(session, event_id):
         result = clean_llm_output(result)
 
         parts        = result.split('---SOURCES_YML---')
-        model_sql    = parts[0].strip()
+        model_sql    = extract_model_sql(parts[0])
         sources_yaml = parts[1].strip() if len(parts) > 1 else ''
 
         changes.append({
