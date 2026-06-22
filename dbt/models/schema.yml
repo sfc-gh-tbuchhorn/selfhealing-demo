@@ -1,133 +1,124 @@
 version: 2
-
-# Column-level documentation and tests.
-# The self-healing pipeline maintains the SILVER model column lists here:
-#   NEW_COLUMN  -> adds a documented column entry to the matching SILVER model
-#   COLUMN_DROP -> removes the column (and its tests) so dbt test stays valid
-# Type changes leave this file structurally unchanged.
-
 models:
-  - name: customers
-    description: "Deduplicated current-state customers from BRONZE CDC."
-    columns:
-      - name: CUSTOMER_ID
-        description: "Unique customer identifier."
-        tests:
-          - unique
-          - not_null
-      - name: FIRST_NAME
-        description: "Customer first name."
-      - name: LAST_NAME
-        description: "Customer last name."
-      - name: EMAIL
-        description: "Customer email address."
-      - name: PHONE
-        description: "Customer phone number."
-      - name: COUNTRY
-        description: "Customer country code."
-      - name: SEGMENT
-        description: "Customer segment."
-      - name: CREATED_AT
-        description: "Source record creation timestamp."
-      - name: UPDATED_AT
-        description: "Source record last-update timestamp."
-      - name: LOYALTY_TIER
-        description: "Customer loyalty tier."
-      - name: PREFERRED_CONTACT
-        description: "Preferred contact channel."
-      - name: PREFERRED_LANGUAGE
-        description: "Preferred language."
-
-  - name: orders
-    description: "Deduplicated current-state orders from BRONZE CDC."
-    columns:
-      - name: ORDER_ID
-        description: "Unique order identifier."
-        tests:
-          - unique
-          - not_null
-      - name: CUSTOMER_ID
-        description: "Customer who placed the order."
-        tests:
-          - not_null
-          - relationships:
-              to: ref('customers')
-              field: CUSTOMER_ID
-      - name: ORDER_DATE
-        description: "Date/time the order was placed."
-      - name: STATUS
-        description: "Order status."
-      - name: TOTAL_AMOUNT
-        description: "Order total amount."
-      - name: CURRENCY
-        description: "Order currency."
-      - name: CHANNEL
-        description: "Sales channel."
-      - name: CREATED_AT
-        description: "Source record creation timestamp."
-      - name: UPDATED_AT
-        description: "Source record last-update timestamp."
-
-  - name: order_items
-    description: "Deduplicated current-state order line items from BRONZE CDC."
-    columns:
-      - name: ITEM_ID
-        description: "Unique line-item identifier."
-        tests:
-          - unique
-          - not_null
-      - name: ORDER_ID
-        description: "Order this line item belongs to."
-        tests:
-          - not_null
-          - relationships:
-              to: ref('orders')
-              field: ORDER_ID
-      - name: PRODUCT_ID
-        description: "Product identifier."
-      - name: PRODUCT_NAME
-        description: "Product name."
-      - name: QUANTITY
-        description: "Units ordered."
-      - name: UNIT_PRICE
-        description: "Price per unit."
-      - name: CREATED_AT
-        description: "Source record creation timestamp."
-
-  - name: orders_daily
-    description: "Daily order aggregates by country, segment, channel, and status."
-    columns:
-      - name: ORDER_DATE
-        description: "Order day (truncated)."
-      - name: COUNTRY
-        description: "Customer country."
-      - name: SEGMENT
-        description: "Customer segment."
-      - name: CHANNEL
-        description: "Sales channel."
-      - name: STATUS
-        description: "Order status."
-      - name: ORDER_COUNT
-        description: "Distinct orders."
-      - name: CUSTOMER_COUNT
-        description: "Distinct customers."
-      - name: TOTAL_REVENUE
-        description: "Sum of order totals."
-      - name: AVG_ORDER_VALUE
-        description: "Average order total."
-
-  - name: category_summary
-    description: "Revenue and volume summary by product."
-    columns:
-      - name: PRODUCT_NAME
-        description: "Product name."
-      - name: ITEMS_SOLD
-        description: "Distinct line items."
-      - name: TOTAL_UNITS
-        description: "Total units sold."
-      - name: TOTAL_REVENUE
-        description: "Total revenue."
-      - name: AVG_UNIT_PRICE
-        description: "Average unit price."
-      - name: ORDER_COUNT
-        description: "Distinct orders."
+- name: customers
+  description: Deduplicated current-state customers from BRONZE CDC.
+  columns:
+  - name: CUSTOMER_ID
+    description: Unique customer identifier.
+    tests:
+    - unique
+    - not_null
+  - name: FIRST_NAME
+    description: Customer first name.
+  - name: LAST_NAME
+    description: Customer last name.
+  - name: EMAIL
+    description: Customer email address.
+  - name: PHONE
+    description: Customer phone number.
+  - name: COUNTRY
+    description: Customer country code.
+  - name: SEGMENT
+    description: Customer segment.
+  - name: CREATED_AT
+    description: Source record creation timestamp.
+  - name: UPDATED_AT
+    description: Source record last-update timestamp.
+  - name: LOYALTY_TIER
+    description: Customer loyalty tier.
+  - name: PREFERRED_CONTACT
+    description: Preferred contact channel.
+  - name: PREFERRED_LANGUAGE
+    description: Preferred language.
+- name: orders
+  description: Deduplicated current-state orders from BRONZE CDC.
+  columns:
+  - name: ORDER_ID
+    description: Unique order identifier.
+    tests:
+    - unique
+    - not_null
+  - name: CUSTOMER_ID
+    description: Customer who placed the order.
+    tests:
+    - not_null
+    - relationships:
+        to: ref('customers')
+        field: CUSTOMER_ID
+  - name: ORDER_DATE
+    description: Date/time the order was placed.
+  - name: STATUS
+    description: Order status.
+  - name: TOTAL_AMOUNT
+    description: Order total amount.
+  - name: CURRENCY
+    description: Order currency.
+  - name: CHANNEL
+    description: Sales channel.
+  - name: CREATED_AT
+    description: Source record creation timestamp.
+  - name: UPDATED_AT
+    description: Source record last-update timestamp.
+  - name: DISCOUNT_CODE
+    description: Column added to ORDERS by schema drift; review/extend tests as needed.
+- name: order_items
+  description: Deduplicated current-state order line items from BRONZE CDC.
+  columns:
+  - name: ITEM_ID
+    description: Unique line-item identifier.
+    tests:
+    - unique
+    - not_null
+  - name: ORDER_ID
+    description: Order this line item belongs to.
+    tests:
+    - not_null
+    - relationships:
+        to: ref('orders')
+        field: ORDER_ID
+  - name: PRODUCT_ID
+    description: Product identifier.
+  - name: PRODUCT_NAME
+    description: Product name.
+  - name: QUANTITY
+    description: Units ordered.
+  - name: UNIT_PRICE
+    description: Price per unit.
+  - name: CREATED_AT
+    description: Source record creation timestamp.
+- name: orders_daily
+  description: Daily order aggregates by country, segment, channel, and status.
+  columns:
+  - name: ORDER_DATE
+    description: Order day (truncated).
+  - name: COUNTRY
+    description: Customer country.
+  - name: SEGMENT
+    description: Customer segment.
+  - name: CHANNEL
+    description: Sales channel.
+  - name: STATUS
+    description: Order status.
+  - name: ORDER_COUNT
+    description: Distinct orders.
+  - name: CUSTOMER_COUNT
+    description: Distinct customers.
+  - name: TOTAL_REVENUE
+    description: Sum of order totals.
+  - name: AVG_ORDER_VALUE
+    description: Average order total.
+- name: category_summary
+  description: Revenue and volume summary by product.
+  columns:
+  - name: PRODUCT_NAME
+    description: Product name.
+  - name: ITEMS_SOLD
+    description: Distinct line items.
+  - name: TOTAL_UNITS
+    description: Total units sold.
+  - name: TOTAL_REVENUE
+    description: Total revenue.
+  - name: AVG_UNIT_PRICE
+    description: Average unit price.
+  - name: ORDER_COUNT
+    description: Distinct orders.
