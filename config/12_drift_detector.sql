@@ -44,6 +44,13 @@ WHERE c.TABLE_SCHEMA = 'BRONZE'
       'EVENT_TYPE','SEEN_AT','SF_METADATA'
   )
   AND r.column_name IS NULL
+  -- only flag NEW_COLUMN for tables already in the registry; a brand-new
+  -- table's columns are handled by the NEW_TABLE branch (avoids double-firing)
+  AND EXISTS (
+      SELECT 1 FROM SELFHEALING_PROD.CONFIG.SCHEMA_REGISTRY rt
+      WHERE rt.table_schema = c.TABLE_SCHEMA
+        AND rt.table_name   = c.TABLE_NAME
+  )
   -- dedupe: skip if we already have a live event for this column
   AND NOT EXISTS (
       SELECT 1 FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS e
