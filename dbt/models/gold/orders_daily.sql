@@ -16,8 +16,8 @@ SELECT
     c.PREFERRED_LANGUAGE,
     COUNT(DISTINCT o.ORDER_ID)         AS order_count,
     COUNT(DISTINCT o.CUSTOMER_ID)      AS customer_count,
-    SUM(CAST(o.TOTAL_AMOUNT AS FLOAT)) AS total_revenue,
-    AVG(CAST(o.TOTAL_AMOUNT AS FLOAT)) AS avg_order_value
+    SUM(o.TOTAL_AMOUNT)                AS total_revenue,
+    AVG(o.TOTAL_AMOUNT)                AS avg_order_value
 FROM {{ ref('orders') }}    o
 JOIN {{ ref('customers') }} c
   ON o.CUSTOMER_ID = c.CUSTOMER_ID
