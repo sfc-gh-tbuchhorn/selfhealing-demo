@@ -48,6 +48,36 @@ DEV_DB         = os.environ.get('DEV_DB',  'SELFHEALING_DEV')
 GITHUB_API     = 'https://api.github.com'
 
 
+def ensure_source_declared(table_name):
+    """For NEW_TABLE: declare the new table under the bronze source in
+    models/sources.yml. The generator emits a sources.yml suggestion but it is
+    not persisted to GENERATED_CODE, so we add it deterministically here.
+    Returns the repo-relative path if the file was changed, else None."""
+    src_full = os.path.join(DBT_DIR, 'models', 'sources.yml')
+    if not os.path.exists(src_full):
+        return None
+    tname = table_name.lower()
+    with open(src_full) as f:
+        lines = f.readlines()
+    if any(re.search(rf"-\s*name:\s*{re.escape(tname)}\s*$", l) for l in lines):
+        return None
+    last_tbl_idx, tbl_indent, in_tables = None, None, False
+    for i, l in enumerate(lines):
+        if re.match(r"\s*tables:\s*$", l):
+            in_tables = True
+            continue
+        if in_tables:
+            m = re.match(r"(\s*)-\s*name:\s*\S+", l)
+            if m:
+                last_tbl_idx, tbl_indent = i, m.group(1)
+    if last_tbl_idx is None:
+        return None
+    lines.insert(last_tbl_idx + 1, f"{tbl_indent}- name: {tname}\n")
+    with open(src_full, 'w') as f:
+        f.writelines(lines)
+    return os.path.join('models', 'sources.yml')
+
+
 def gh_headers(token):
     return {
         'Authorization': f'token {token}',
@@ -246,6 +276,17 @@ def run(event_id):
             f.write(generated_sql)
         print(f"  Written: {file_path}")
 
+    # NEW_TABLE: declare the new bronze source (not carried in GENERATED_CODE)
+    sources_rel = None
+    if change_type == 'NEW_TABLE':
+        src_full = os.path.join(DBT_DIR, 'models', 'sources.yml')
+        if os.path.exists(src_full):
+            with open(src_full) as f:
+                backups[src_full] = f.read()
+        sources_rel = ensure_source_declared(table_name)
+        if sources_rel:
+            print(f"  Declared new source: bronze.{table_name}")
+
     # ── 4. Open PR immediately (PR-first) ─────────────────────
     token  = os.environ.get('GITHUB_PAT', '')
     pr_url = ''
@@ -261,6 +302,14 @@ def run(event_id):
                     f"[self-healing] {change_type} on {table_name}: update {artifact_name}"
                 )
                 print(f"  Committed: {REPO_DBT_PREFIX + file_path}")
+            if sources_rel:
+                with open(os.path.join(DBT_DIR, sources_rel)) as f:
+                    src_content = f.read()
+                commit_file_to_branch(
+                    token, branch_name, REPO_DBT_PREFIX + sources_rel, src_content,
+                    f"[self-healing] {change_type} on {table_name}: declare bronze source"
+                )
+                print(f"  Committed: {REPO_DBT_PREFIX + sources_rel}")
             pr_url = open_pr(token, branch_name, change_type, table_name, column_name, artifacts)
             print(f"  PR opened: {pr_url}")
             pr_url_esc = pr_url.replace("'", "''")
