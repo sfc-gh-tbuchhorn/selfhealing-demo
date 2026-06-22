@@ -149,6 +149,40 @@ def maintain_schema_yml(token, change_type, table_name, column_name, branch):
     )
 
 
+def declare_new_source(token, table_name, branch):
+    """For NEW_TABLE: declare the new table under the bronze source in
+    dbt/models/sources.yml. The generator emits a sources.yml suggestion but it
+    is not persisted to GENERATED_CODE, so add it deterministically here so the
+    generated SILVER model's {{ source('bronze', ...) }} compiles. (No LLM.)"""
+    import yaml
+    path = 'dbt/models/sources.yml'
+    r = requests.get(
+        f'{GITHUB_API}/repos/{REPO}/contents/{path}',
+        headers=gh_headers(token), params={'ref': branch}
+    )
+    if r.status_code != 200:
+        return
+    meta = r.json()
+    doc  = yaml.safe_load(base64.b64decode(meta['content']).decode()) or {}
+    tname = table_name.lower()
+    changed = False
+    for src in doc.get('sources', []):
+        if str(src.get('name', '')).lower() != 'bronze':
+            continue
+        tables = src.get('tables') or []
+        if not any(str(t.get('name', '')).lower() == tname for t in tables):
+            tables.append({'name': tname})
+            src['tables'] = tables
+            changed = True
+    if not changed:
+        return
+    new_yaml = yaml.safe_dump(doc, sort_keys=False, default_flow_style=False, width=1000)
+    commit_file(
+        token, path, new_yaml, branch,
+        f'schema(new_table): declare bronze source {tname}', meta['sha']
+    )
+
+
 def run(session):
     global REPO, TEST_PROJECT
     _s = {r[0]: r[1] for r in session.sql('SELECT key, value FROM SELFHEALING_PROD.CONFIG.SETTINGS').collect()}
@@ -159,7 +193,7 @@ def run(session):
 
     # Find oldest event with pipeline_status = PENDING
     rows = session.sql("""
-        SELECT event_id, change_type, table_name
+        SELECT event_id, change_type, table_name, column_name
         FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
         WHERE pipeline_status = 'PENDING'
           AND status          = 'PENDING'
@@ -212,7 +246,7 @@ def run(session):
 
     # ── Open PR immediately (PR-first: PR is the guaranteed deliverable) ────
     table_name  = rows[0]['TABLE_NAME']
-    column_name = gen_result.get('column_name', '')
+    column_name = rows[0]['COLUMN_NAME'] or ''
 
     # Keep schema.yml (column-level docs/tests) in sync. Defensive: a failure
     # here must never block the PR, so it is best-effort and swallows errors.
@@ -221,6 +255,14 @@ def run(session):
             maintain_schema_yml(token, change_type, table_name, column_name, branch_name)
     except Exception as e:
         print('schema.yml maintenance skipped:', e)
+
+    # NEW_TABLE: declare the new bronze source so the generated model compiles.
+    # Best-effort — must never block the PR.
+    try:
+        if change_type == 'NEW_TABLE':
+            declare_new_source(token, table_name, branch_name)
+    except Exception as e:
+        print('source declaration skipped:', e)
 
     artifact_list = [
         f"- `{c['artifact_name']}` ({c['action']})"
