@@ -416,6 +416,25 @@ python3 config/materialise_in_dev.py <event-id>
 > ```
 > The detector raises a `COLUMN_DROP` event for `DISCOUNT_CODE`, and `GENERATE_NEXT_PENDING` regenerates the impacted models with the column removed.
 
+> **Simulating a type change on trial.** Snowflake won't let you `ALTER` a base column to a different data type, so change the baseline instead: point `SCHEMA_REGISTRY` at the *old* type while BRONZE keeps the current one. The detector flags the mismatch exactly as it would for a real Openflow type remap. Example — pretend `ORDERS.TOTAL_AMOUNT` (currently `FLOAT`) was previously `NUMBER`:
+> ```bash
+> snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+> UPDATE SELFHEALING_PROD.CONFIG.SCHEMA_REGISTRY SET data_type='NUMBER'
+> WHERE table_name='ORDERS' AND column_name='TOTAL_AMOUNT';"
+> ```
+> The detector raises a `TYPE_CHANGE` event (old `NUMBER` → new `FLOAT`), and the generator wraps the column in `CAST(TOTAL_AMOUNT AS FLOAT)` wherever it appears.
+
+> **Simulating a new table on trial.** Create a table directly in BRONZE. It **must** include the Openflow metadata columns the SILVER template relies on (`_SNOWFLAKE_INSERTED_AT`, `_SNOWFLAKE_UPDATED_AT`, `_SNOWFLAKE_DELETED`); the first non-metadata column becomes the primary key:
+> ```bash
+> snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
+> CREATE OR REPLACE TABLE SELFHEALING_PROD.BRONZE.SHIPMENTS (
+>   SHIPMENT_ID NUMBER, ORDER_ID NUMBER, CARRIER VARCHAR, TRACKING_NUMBER VARCHAR,
+>   SHIPPED_AT TIMESTAMP_NTZ, STATUS VARCHAR,
+>   _SNOWFLAKE_INSERTED_AT TIMESTAMP_NTZ, _SNOWFLAKE_UPDATED_AT TIMESTAMP_NTZ, _SNOWFLAKE_DELETED BOOLEAN
+> );"
+> ```
+> The detector raises a `NEW_TABLE` event, the generator creates a new SILVER model, and `materialise_in_dev.py` also declares the new table under the `bronze` source in `sources.yml`.
+
 **Merge and re-baseline.** Review the PR and CI comment, then **merge** it. On trial there is no merge-detection task, so run the resolution step manually after merging — it advances `SCHEMA_REGISTRY` to include the change and marks the event `RESOLVED`, so the drift detector stops re-flagging it:
 
 ```bash
