@@ -1,9 +1,24 @@
 selfhealing:
   target: prod
   outputs:
+    # prod — used ONLY for the one-time bootstrap PROD materialization and any
+    # PROD redeploy/validation. Runs as an admin role that can create SILVER/
+    # GOLD tables in SELFHEALING_PROD.
     prod:
       type:      snowflake
       database:  SELFHEALING_PROD
+      schema:    PUBLIC
+      role:      ACCOUNTADMIN
+      warehouse: SELFHEALING_WH
+    # dev — used by the self-healing pipeline's DEV-clone test (RUN_DEV_TEST /
+    # materialise_in_dev.py). Runs as the least-privilege SELFHEALING_PIPELINE
+    # role, which can ONLY write to the SELFHEALING_DEV clone. This is the
+    # guardrail: the test pipeline is physically incapable of writing to PROD,
+    # so a model misconfigured to target PROD fails loudly instead of silently
+    # polluting production.
+    dev:
+      type:      snowflake
+      database:  SELFHEALING_DEV
       schema:    PUBLIC
       role:      SELFHEALING_PIPELINE
       warehouse: SELFHEALING_WH
