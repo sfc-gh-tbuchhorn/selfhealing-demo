@@ -112,7 +112,7 @@ BEGIN
             AFTER     SELFHEALING_PROD.CONFIG.PIPELINE_ROOT
         AS
             EXECUTE DBT PROJECT SELFHEALING_PROD.CONFIG.SELFHEALING
-                ARGS = 'run --vars "{db_name: SELFHEALING_DEV}" --target prod';
+                ARGS = 'run --vars "{db_name: SELFHEALING_DEV}" --target dev';
         CREATE OR REPLACE TASK SELFHEALING_PROD.CONFIG.COMMIT_AND_MR
             WAREHOUSE = SELFHEALING_WH
             AFTER     SELFHEALING_PROD.CONFIG.RUN_DEV_TEST
