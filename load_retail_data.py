@@ -1,4 +1,5 @@
 import os, psycopg2, uuid, random, datetime, sys
+from psycopg2.extras import execute_values
 
 PG_HOST = os.environ["PG_HOST"]
 PG_USER = os.environ.get("PG_USER", "application")
@@ -15,6 +16,9 @@ LAST_NAMES  = ["Smith","Johnson","Williams","Brown","Jones","Garcia","Miller","D
 DOMAINS     = ["gmail.com","yahoo.com","outlook.com","icloud.com","hotmail.com"]
 COUNTRIES   = ["AU","US","GB","CA","NZ","SG","JP","DE","FR","IN"]
 SEGMENTS    = ["Premium","Standard","Basic","VIP","Wholesale"]
+LOYALTY_TIERS = ["Bronze","Silver","Gold","Platinum"]
+CONTACT_METHODS = ["email","phone","sms"]
+LANGUAGES   = ["en","fr","de","ja","es"]
 CATEGORIES  = ["Electronics","Clothing","Home & Garden","Books","Sports","Toys","Beauty","Food","Automotive","Office"]
 STATUSES    = ["completed","completed","completed","pending","shipped","returned","cancelled"]
 CHANNELS    = ["web","mobile","in-store","phone"]
@@ -50,22 +54,27 @@ cur  = conn.cursor()
 
 print(f"Inserting {N_CUSTOMERS} customers...", flush=True)
 customer_ids = []
+customer_rows = []
 for _ in range(N_CUSTOMERS):
     cid = str(uuid.uuid4())
     customer_ids.append(cid)
     fn  = random.choice(FIRST_NAMES)
     ln  = random.choice(LAST_NAMES)
-    cur.execute(
-        "INSERT INTO retail.customers VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+    customer_rows.append(
         (cid, fn, ln, f"{fn.lower()}.{ln.lower()}{random.randint(1,99)}@{random.choice(DOMAINS)}",
          f"+61 4{random.randint(10,99)} {random.randint(100,999)} {random.randint(100,999)}",
          random.choice(COUNTRIES), random.choice(SEGMENTS),
-         rand_ts(730), rand_ts(30))
+         rand_ts(730), rand_ts(30),
+         random.choice(LOYALTY_TIERS), random.choice(CONTACT_METHODS), random.choice(LANGUAGES))
     )
+execute_values(cur,
+    "INSERT INTO retail.customers VALUES %s ON CONFLICT DO NOTHING",
+    customer_rows, page_size=500)
 
 conn.commit()
 print(f"Inserting {N_ORDERS} orders + line items...", flush=True)
 
+order_rows = []
 item_rows = []
 for i in range(N_ORDERS):
     oid      = str(uuid.uuid4())
@@ -75,23 +84,20 @@ for i in range(N_ORDERS):
     items    = random.sample(PRODUCTS, n_items)
     total    = sum(p[3] * random.randint(1,3) for p in items)
 
-    cur.execute(
-        "INSERT INTO retail.orders VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+    order_rows.append(
         (oid, cid, order_ts, random.choice(STATUSES), round(total,2),
          "USD", random.choice(CHANNELS), order_ts, order_ts)
     )
     for pid, pname, cat, price in items:
         qty = random.randint(1,3)
-        item_rows.append((str(uuid.uuid4()), oid, pid, pname, cat, qty, price, order_ts))
+        item_rows.append((str(uuid.uuid4()), oid, pid, pname, qty, price, order_ts))
 
-    if (i+1) % 500 == 0:
-        conn.commit()
-        print(f"  {i+1}/{N_ORDERS} orders committed", flush=True)
-
-cur.executemany(
-    "INSERT INTO retail.order_items VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-    item_rows
-)
+execute_values(cur,
+    "INSERT INTO retail.orders VALUES %s ON CONFLICT DO NOTHING",
+    order_rows, page_size=1000)
+execute_values(cur,
+    "INSERT INTO retail.order_items VALUES %s ON CONFLICT DO NOTHING",
+    item_rows, page_size=1000)
 conn.commit()
 cur.close()
 conn.close()
