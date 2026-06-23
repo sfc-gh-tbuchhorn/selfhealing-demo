@@ -82,6 +82,16 @@ $$;
 -- ── Make the role assumable by admins ─────────────────────────
 GRANT ROLE SELFHEALING_PIPELINE TO ROLE SYSADMIN;
 
+-- ── Transfer DBT PROJECT ownership to pipeline role ────────────
+-- The bootstrap step (CREATE DBT PROJECT ... FROM @.../main/dbt/) creates the
+-- project as ACCOUNTADMIN. GENERATE_AND_PREP and RUN_DEV_TEST run as
+-- SELFHEALING_PIPELINE (task owner) and need to own the project to
+-- CREATE OR REPLACE it (from the feature branch) and EXECUTE it.
+-- SELFHEALING_PIPELINE is granted to SYSADMIN → ACCOUNTADMIN, so
+-- ACCOUNTADMIN (SYNC_FROM_MAIN, EXECUTE AS OWNER) retains access via hierarchy.
+GRANT OWNERSHIP ON DBT PROJECT SELFHEALING_PROD.CONFIG.SELFHEALING
+    TO ROLE SELFHEALING_PIPELINE COPY CURRENT GRANTS;
+
 -- ── Rebuild DAG edges + resume, AS the pipeline role ──────────
 -- Transferring task ownership one-by-one (above) severs the AFTER/FINALIZE
 -- edges of a task DAG: Snowflake requires every task in a DAG to share one
