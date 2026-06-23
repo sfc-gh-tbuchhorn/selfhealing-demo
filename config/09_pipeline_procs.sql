@@ -325,6 +325,14 @@ _Results will be posted as a comment below._
         f'FROM @{GIT_REPO}/branches/"{branch_name}"/dbt/'
     ).collect()
 
+    # CREATE OR REPLACE resets ownership to the creating role.  Re-grant to
+    # SELFHEALING_PIPELINE so RUN_DEV_TEST (task owner) can EXECUTE it and
+    # so retries of this proc can replace it without hitting auth errors.
+    session.sql(
+        f'GRANT OWNERSHIP ON DBT PROJECT {TEST_PROJECT} '
+        f'TO ROLE SELFHEALING_PIPELINE COPY CURRENT GRANTS'
+    ).collect()
+
     return f'PR opened: {pr_url} — event {event_id} ready for dbt CI'
 $$;
 

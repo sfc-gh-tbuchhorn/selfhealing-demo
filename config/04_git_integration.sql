@@ -55,8 +55,9 @@ EXECUTE AS OWNER
 AS
 $$
 DECLARE
-    dbt_proj   STRING;
-    events_res RESULTSET;
+    dbt_proj          STRING;
+    events_res        RESULTSET;
+    in_flight_branch  STRING DEFAULT NULL;
 BEGIN
     -- Pull latest commits from GitHub (including merged main)
     ALTER GIT REPOSITORY SELFHEALING_PROD.CONFIG.SELFHEALING_REPO FETCH;
@@ -79,6 +80,33 @@ BEGIN
     EXECUTE IMMEDIATE
         'CREATE OR REPLACE DBT PROJECT ' || dbt_proj ||
         ' FROM @SELFHEALING_PROD.CONFIG.SELFHEALING_REPO/branches/main/dbt/';
+
+    -- CREATE OR REPLACE resets ownership to the creating role (ACCOUNTADMIN).
+    -- Re-grant ownership to the pipeline role so RUN_DEV_TEST (which runs as
+    -- SELFHEALING_PIPELINE) can EXECUTE the project, and so GENERATE_AND_PREP
+    -- (also SELFHEALING_PIPELINE) can CREATE OR REPLACE it for in-flight PRs.
+    EXECUTE IMMEDIATE
+        'GRANT OWNERSHIP ON DBT PROJECT ' || dbt_proj ||
+        ' TO ROLE SELFHEALING_PIPELINE COPY CURRENT GRANTS';
+
+    -- If there is already a PR_OPEN event on a feature branch (i.e. a schema
+    -- change is in-flight), immediately redeploy the project from that branch.
+    -- Without this, SYNC_FROM_MAIN would clobber the feature-branch project
+    -- and RUN_DEV_TEST would fail against the stale main-branch version.
+    SELECT MAX(branch_name) INTO :in_flight_branch
+    FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
+    WHERE pipeline_status = 'PR_OPEN'
+      AND branch_name IS NOT NULL;
+
+    IF (in_flight_branch IS NOT NULL) THEN
+        EXECUTE IMMEDIATE
+            'CREATE OR REPLACE DBT PROJECT ' || dbt_proj ||
+            ' FROM @SELFHEALING_PROD.CONFIG.SELFHEALING_REPO/branches/"'
+            || in_flight_branch || '"/dbt/';
+        EXECUTE IMMEDIATE
+            'GRANT OWNERSHIP ON DBT PROJECT ' || dbt_proj ||
+            ' TO ROLE SELFHEALING_PIPELINE COPY CURRENT GRANTS';
+    END IF;
 
     -- Advance SCHEMA_REGISTRY + mark resolved for every event on this branch.
     -- Delegates to RESOLVE_EVENT so all four change types are handled with a
