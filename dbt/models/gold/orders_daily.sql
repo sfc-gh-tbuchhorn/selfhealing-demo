@@ -14,7 +14,6 @@ SELECT
     c.LOYALTY_TIER,
     c.PREFERRED_CONTACT,
     c.PREFERRED_LANGUAGE,
-    o.DISCOUNT_CODE,
     COUNT(DISTINCT o.ORDER_ID)         AS order_count,
     COUNT(DISTINCT o.CUSTOMER_ID)      AS customer_count,
     SUM(o.TOTAL_AMOUNT)                AS total_revenue,
@@ -22,4 +21,4 @@ SELECT
 FROM {{ ref('orders') }}    o
 JOIN {{ ref('customers') }} c
   ON o.CUSTOMER_ID = c.CUSTOMER_ID
-GROUP BY 1,2,3,4,5,6,7,8,9
+GROUP BY 1,2,3,4,5,6,7,8
