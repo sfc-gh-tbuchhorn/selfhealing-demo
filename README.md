@@ -23,8 +23,7 @@ SELFHEALING_PROD.BRONZE.<table>
       │
       │  SCHEMA_DRIFT_DETECTOR (Task, 15 min)
       │  Compares INFORMATION_SCHEMA vs SCHEMA_REGISTRY
-      │  Detects: NEW_COLUMN, COLUMN_DROP (__SNOWFLAKE_DELETED),
-      │           TYPE_CHANGE, NEW_TABLE
+      │  Detects: NEW_COLUMN, COLUMN_DROP (__SNOWFLAKE_DELETED), NEW_TABLE
       ▼
 SCHEMA_CHANGE_EVENTS
       │
@@ -416,14 +415,6 @@ python3 config/materialise_in_dev.py <event-id>
 > ```
 > The detector raises a `COLUMN_DROP` event for `DISCOUNT_CODE`, and `GENERATE_NEXT_PENDING` regenerates the impacted models with the column removed.
 
-> **Simulating a type change on trial.** Snowflake won't let you `ALTER` a base column to a different data type, so change the baseline instead: point `SCHEMA_REGISTRY` at the *old* type while BRONZE keeps the current one. The detector flags the mismatch exactly as it would for a real Openflow type remap. Example — pretend `ORDERS.TOTAL_AMOUNT` (currently `FLOAT`) was previously `NUMBER`:
-> ```bash
-> snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
-> UPDATE SELFHEALING_PROD.CONFIG.SCHEMA_REGISTRY SET data_type='NUMBER'
-> WHERE table_name='ORDERS' AND column_name='TOTAL_AMOUNT';"
-> ```
-> The detector raises a `TYPE_CHANGE` event (old `NUMBER` → new `FLOAT`), and the generator wraps the column in `CAST(TOTAL_AMOUNT AS FLOAT)` wherever it appears.
-
 > **Simulating a new table on trial.** Create a table directly in BRONZE. It **must** include the Openflow metadata columns the SILVER template relies on (`_SNOWFLAKE_INSERTED_AT`, `_SNOWFLAKE_UPDATED_AT`, `_SNOWFLAKE_DELETED`); the first non-metadata column becomes the primary key:
 > ```bash
 > snow sql -c $SNOWFLAKE_CONNECTION_SQL -q "
@@ -460,7 +451,6 @@ A detected schema change is **always guaranteed to produce a PR** (`PR_OPEN`). T
 | Event type | Expected model updates |
 |---|---|
 | `NEW_COLUMN` on ORDERS | `SILVER.orders` (add column + cast), `GOLD.orders_daily` (if used in aggregate) |
-| `TYPE_CHANGE` | All models in the lineage graph that reference the column |
 | `COLUMN_DROP` | Deprecation comment added; downstream models updated |
 | `NEW_TABLE` | New SILVER model generated; `sources.yml` updated |
 
@@ -535,7 +525,7 @@ This is a proof of concept for the pattern **drift → AI regeneration → PR-fi
 - **Only `models/` are regenerated.** `ARTIFACT_REGISTRY` tracks dbt models. Changes affecting snapshots, seeds, macros, or analyses are not detected or regenerated.
 - **Concurrent changes are processed sequentially.** `PIPELINE_ROOT` handles one `PENDING` event at a time. If two changes occur close together, the second PR's SQL can be stale relative to a `main` that already merged the first. The DEV-clone `dbt run` catches outright breakage but not silent staleness — regenerate against latest `main` if PRs overlap.
 
-**Column-level docs/tests are maintained.** `schema.yml` is kept in sync: a `NEW_COLUMN` adds a documented column entry to the affected SILVER model, and a `COLUMN_DROP` removes the column (and its tests) so `dbt test` does not fail on columns that no longer exist. (Type changes leave `schema.yml` structurally unchanged.)
+**Column-level docs/tests are maintained.** `schema.yml` is kept in sync: a `NEW_COLUMN` adds a documented column entry to the affected SILVER model, and a `COLUMN_DROP` removes the column (and its tests) so `dbt test` does not fail on columns that no longer exist.
 
 ## Teardown
 
