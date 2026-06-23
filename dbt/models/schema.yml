@@ -59,8 +59,7 @@ models:
     description: Source record creation timestamp.
   - name: UPDATED_AT
     description: Source record last-update timestamp.
-  - name: DISCOUNT_CODE
-    description: Column added to ORDERS by schema drift; review/extend tests as needed.
+
 - name: order_items
   description: Deduplicated current-state order line items from BRONZE CDC.
   columns:

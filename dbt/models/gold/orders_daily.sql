@@ -14,7 +14,6 @@ SELECT
     c.LOYALTY_TIER,
     c.PREFERRED_CONTACT,
     c.PREFERRED_LANGUAGE,
-    o.DISCOUNT_CODE,
     COUNT(DISTINCT o.ORDER_ID)         AS order_count,
     COUNT(DISTINCT o.CUSTOMER_ID)      AS customer_count,
     SUM(o.TOTAL_AMOUNT)                AS total_revenue,
