@@ -317,24 +317,63 @@ _Results will be posted as a comment below._
     ).collect()
 
     # Deploy TEST_PROJECT from the feature branch (used by RUN_DEV_TEST task).
-    # Branch names with slashes need quoting: /branches/"schema-change/xxx"/
-    # The dbt project lives in the repo's dbt/ subdirectory, so the path ends
-    # in /dbt/ (dbt_project.yml must be at the FROM path root).
-    session.sql(
-        f'CREATE OR REPLACE DBT PROJECT {TEST_PROJECT} '
-        f'FROM @{GIT_REPO}/branches/"{branch_name}"/dbt/'
-    ).collect()
-
-    # CREATE OR REPLACE resets ownership to the creating role.  Re-grant to
-    # SELFHEALING_PIPELINE so RUN_DEV_TEST (task owner) can EXECUTE it and
-    # so retries of this proc can replace it without hitting auth errors.
-    session.sql(
-        f'GRANT OWNERSHIP ON DBT PROJECT {TEST_PROJECT} '
-        f'TO ROLE SELFHEALING_PIPELINE COPY CURRENT GRANTS'
-    ).collect()
+    # CREATE OR REPLACE DBT PROJECT from a Python stored procedure fails with
+    # "Requested role ACCOUNTADMIN is not assigned to the executing user" when
+    # the calling task is owned by SELFHEALING_PIPELINE — even though this proc
+    # is EXECUTE AS OWNER (ACCOUNTADMIN).  The same DDL works fine in SQL stored
+    # procedures (SYNC_FROM_MAIN).  Delegate to a SQL proc that bypasses this.
+    session.call(
+        'SELFHEALING_PROD.CONFIG.DEPLOY_PROJECT_FROM_BRANCH',
+        branch_name
+    )
 
     return f'PR opened: {pr_url} — event {event_id} ready for dbt CI'
 $$;
+
+
+-- -----------------------------------------------------------
+-- DEPLOY_PROJECT_FROM_BRANCH
+-- SQL stored procedure that creates the DBT PROJECT from the
+-- supplied branch.  CREATE OR REPLACE DBT PROJECT works in a
+-- SQL proc even when called from a SELFHEALING_PIPELINE task,
+-- whereas the equivalent session.sql() call in a Python proc
+-- fails with an ACCOUNTADMIN role error.
+-- EXECUTE AS OWNER: same owner (ACCOUNTADMIN) as SYNC_FROM_MAIN.
+-- -----------------------------------------------------------
+CREATE OR REPLACE PROCEDURE SELFHEALING_PROD.CONFIG.DEPLOY_PROJECT_FROM_BRANCH(
+    branch_name VARCHAR
+)
+RETURNS VARCHAR
+LANGUAGE SQL
+EXECUTE AS OWNER
+AS
+$$
+DECLARE
+    dbt_proj  STRING;
+    git_repo  STRING DEFAULT 'SELFHEALING_PROD.CONFIG.SELFHEALING_REPO';
+BEGIN
+    SELECT MAX(value) INTO :dbt_proj
+    FROM SELFHEALING_PROD.CONFIG.SETTINGS
+    WHERE key = 'dbt_project';
+
+    IF (dbt_proj IS NULL) THEN
+        dbt_proj := 'SELFHEALING_PROD.CONFIG.SELFHEALING';
+    END IF;
+
+    EXECUTE IMMEDIATE
+        'CREATE OR REPLACE DBT PROJECT ' || dbt_proj ||
+        ' FROM @' || git_repo || '/branches/"' || branch_name || '"/dbt/';
+
+    EXECUTE IMMEDIATE
+        'GRANT OWNERSHIP ON DBT PROJECT ' || dbt_proj ||
+        ' TO ROLE SELFHEALING_PIPELINE COPY CURRENT GRANTS';
+
+    RETURN 'deployed: ' || branch_name;
+END;
+$$;
+
+GRANT USAGE ON PROCEDURE SELFHEALING_PROD.CONFIG.DEPLOY_PROJECT_FROM_BRANCH(VARCHAR)
+  TO ROLE SELFHEALING_PIPELINE;
 
 
 -- -----------------------------------------------------------
