@@ -21,4 +21,4 @@ SELECT
 FROM {{ ref('orders') }}    o
 JOIN {{ ref('customers') }} c
   ON o.CUSTOMER_ID = c.CUSTOMER_ID
-GROUP BY 1,2,3,4,5,6,7,8,9
+GROUP BY 1,2,3,4,5,6,7,8
