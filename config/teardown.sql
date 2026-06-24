@@ -9,23 +9,11 @@
 
 USE ROLE ACCOUNTADMIN;
 
--- ── 1. Suspend tasks before dropping (best effort) ────────────
--- Root must be suspended first; Snowflake rejects suspending child
--- tasks while the root is still running.
--- Note: ALTER TASK IF EXISTS raises a compilation error when the
--- database itself does not exist, so these statements are skipped
--- harmlessly if SELFHEALING_PROD has already been dropped.
--- Stop the Openflow connector before running this script to avoid
--- CDC writes landing in BRONZE during teardown.
-BEGIN
-  ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.PIPELINE_ROOT         SUSPEND;
-  ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.SCHEMA_DRIFT_DETECTOR SUSPEND;
-  ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.PIPELINE_FINALIZER    SUSPEND;
-  ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.COMMIT_AND_MR         SUSPEND;
-  ALTER TASK IF EXISTS SELFHEALING_PROD.CONFIG.RUN_DEV_TEST          SUSPEND;
-EXCEPTION
-  WHEN OTHER THEN NULL; -- database may not exist; DROP DATABASE below handles cleanup
-END;
+-- ── 1. Tasks are dropped automatically when SELFHEALING_PROD is ─
+--       dropped below (tasks live inside the database). No explicit
+--       suspend is needed. Stop the Openflow connector before running
+--       this script to prevent CDC writes during teardown.
+
 
 -- ── 2. Detach network policy from Snowflake Postgres instance ──
 --       Must happen before dropping SELFHEALING_PROD, which contains
