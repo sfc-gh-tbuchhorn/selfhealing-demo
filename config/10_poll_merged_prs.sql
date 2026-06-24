@@ -25,15 +25,21 @@ def gh_headers(token):
     }
 
 
-def is_merged(token, branch_name):
+def get_pr_state(token, branch_name):
+    """Return 'merged', 'closed' (rejected), or 'open' for the branch's PR."""
     owner = REPO.split('/')[0]
     r = requests.get(
         f'{GITHUB_API}/repos/{REPO}/pulls',
         headers=gh_headers(token),
-        params={'head': f'{owner}:{branch_name}', 'state': 'closed'}
+        params={'head': f'{owner}:{branch_name}', 'state': 'all'}
     )
     prs = r.json() if r.ok else []
-    return any(pr.get('merged_at') for pr in prs)
+    for pr in prs:
+        if pr.get('merged_at'):
+            return 'merged'
+        if pr.get('state') == 'closed':
+            return 'closed'
+    return 'open'
 
 
 def run(session):
@@ -53,10 +59,14 @@ def run(session):
     if not rows:
         return 'No open PRs to check'
 
-    synced = []
+    synced  = []
+    retried = []
     for row in rows:
-        branch = row['BRANCH_NAME']
-        if is_merged(token, branch):
+        branch   = row['BRANCH_NAME']
+        event_id = row['EVENT_ID']
+        state    = get_pr_state(token, branch)
+
+        if state == 'merged':
             # Use session.call() rather than session.sql('CALL ...').collect():
             # collecting a CALL result whose single column is the proc name
             # ('SYNC_FROM_MAIN') trips a Snowpark "existing quoted column
@@ -64,9 +74,23 @@ def run(session):
             session.call('SELFHEALING_PROD.CONFIG.SYNC_FROM_MAIN', branch)
             synced.append(branch)
 
-    if synced:
-        return 'Synced: ' + ', '.join(synced)
-    return 'Checked ' + str(len(rows)) + ' open PR(s) — none merged yet'
+        elif state == 'closed':
+            # PR was closed without merging (rejected by reviewer).
+            # Reset to PENDING so GENERATE_AND_PREP retries with a fresh
+            # branch and PR — prevents the event being stuck forever.
+            session.sql(f"""
+                UPDATE SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
+                SET pipeline_status = 'PENDING',
+                    branch_name     = NULL,
+                    mr_url          = NULL
+                WHERE event_id = '{event_id}'
+            """).collect()
+            retried.append(branch)
+
+    parts = []
+    if synced:  parts.append('Synced: '  + ', '.join(synced))
+    if retried: parts.append('Retried: ' + ', '.join(retried))
+    return ', '.join(parts) if parts else 'Checked ' + str(len(rows)) + ' open PR(s) — none merged yet'
 $$;
 
 
