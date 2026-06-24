@@ -36,16 +36,31 @@ AS
 
 -- -----------------------------------------------------------
 -- RUN_DEV_TEST: dbt run against SELFHEALING_DEV clone
+-- Only executes when GENERATE_AND_PREP has opened a PR (event in
+-- PR_OPEN state). Without this guard the task fires on every
+-- PIPELINE_ROOT run — including "no-op" runs where no PENDING event
+-- existed and SELFHEALING_DEV may not have been refreshed yet,
+-- causing spurious failures that PIPELINE_FINALIZER misreads as CI
+-- failures and incorrectly marks the event CI_FAILED.
 -- -----------------------------------------------------------
 CREATE OR REPLACE TASK SELFHEALING_PROD.CONFIG.RUN_DEV_TEST
     WAREHOUSE = SELFHEALING_WH
     AFTER     SELFHEALING_PROD.CONFIG.PIPELINE_ROOT
 AS
-    -- Must match the project GENERATE_AND_PREP creates (= SETTINGS.dbt_project
-    -- = $DBT_PROJECT). A task body can't read SETTINGS, so this name is fixed:
-    -- keep $DBT_PROJECT = SELFHEALING_PROD.CONFIG.SELFHEALING for the full version.
-    EXECUTE DBT PROJECT SELFHEALING_PROD.CONFIG.SELFHEALING
-        ARGS = 'run --vars "{db_name: SELFHEALING_DEV}" --target dev';
+BEGIN
+    LET pr_open INTEGER DEFAULT 0;
+    SELECT COUNT(*) INTO :pr_open
+    FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
+    WHERE pipeline_status = 'PR_OPEN';
+
+    IF (pr_open > 0) THEN
+        -- Must match the project GENERATE_AND_PREP creates (= SETTINGS.dbt_project
+        -- = $DBT_PROJECT). A task body can't read SETTINGS, so this name is fixed:
+        -- keep $DBT_PROJECT = SELFHEALING_PROD.CONFIG.SELFHEALING for the full version.
+        EXECUTE DBT PROJECT SELFHEALING_PROD.CONFIG.SELFHEALING
+            ARGS = 'run --vars "{db_name: SELFHEALING_DEV}" --target dev';
+    END IF;
+END;
 
 -- -----------------------------------------------------------
 -- COMMIT_AND_MR: open GitHub PR after dbt passes
