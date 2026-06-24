@@ -37,30 +37,45 @@ AS
 -- -----------------------------------------------------------
 -- RUN_DEV_TEST: dbt run against SELFHEALING_DEV clone
 -- Only executes when GENERATE_AND_PREP has opened a PR (event in
--- PR_OPEN state). Without this guard the task fires on every
--- PIPELINE_ROOT run — including "no-op" runs where no PENDING event
--- existed and SELFHEALING_DEV may not have been refreshed yet,
--- causing spurious failures that PIPELINE_FINALIZER misreads as CI
--- failures and incorrectly marks the event CI_FAILED.
+-- PR_OPEN state). EXECUTE DBT PROJECT is not valid inside a SQL
+-- scripting BEGIN...END block, so the guard lives in a thin Python
+-- wrapper procedure that calls it via session.sql().
 -- -----------------------------------------------------------
+CREATE OR REPLACE PROCEDURE SELFHEALING_PROD.CONFIG.RUN_DEV_TEST_IF_OPEN()
+RETURNS VARCHAR
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.11'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'run'
+EXECUTE AS OWNER
+AS $$
+DBT_PROJECT = 'SELFHEALING_PROD.CONFIG.SELFHEALING'
+
+def run(session):
+    rows = session.sql("""
+        SELECT COUNT(*) AS n
+        FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
+        WHERE pipeline_status = 'PR_OPEN'
+    """).collect()
+
+    if rows[0]['N'] == 0:
+        return 'No PR_OPEN events — skipping dbt test'
+
+    session.sql(
+        f"EXECUTE DBT PROJECT {DBT_PROJECT}"
+        f" ARGS = 'run --vars \"{{db_name: SELFHEALING_DEV}}\" --target dev'"
+    ).collect()
+    return 'dbt test complete'
+$$;
+
+GRANT USAGE ON PROCEDURE SELFHEALING_PROD.CONFIG.RUN_DEV_TEST_IF_OPEN()
+  TO ROLE SELFHEALING_PIPELINE;
+
 CREATE OR REPLACE TASK SELFHEALING_PROD.CONFIG.RUN_DEV_TEST
     WAREHOUSE = SELFHEALING_WH
     AFTER     SELFHEALING_PROD.CONFIG.PIPELINE_ROOT
 AS
-BEGIN
-    LET pr_open INTEGER DEFAULT 0;
-    SELECT COUNT(*) INTO :pr_open
-    FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
-    WHERE pipeline_status = 'PR_OPEN';
-
-    IF (pr_open > 0) THEN
-        -- Must match the project GENERATE_AND_PREP creates (= SETTINGS.dbt_project
-        -- = $DBT_PROJECT). A task body can't read SETTINGS, so this name is fixed:
-        -- keep $DBT_PROJECT = SELFHEALING_PROD.CONFIG.SELFHEALING for the full version.
-        EXECUTE DBT PROJECT SELFHEALING_PROD.CONFIG.SELFHEALING
-            ARGS = 'run --vars "{db_name: SELFHEALING_DEV}" --target dev';
-    END IF;
-END;
+    CALL SELFHEALING_PROD.CONFIG.RUN_DEV_TEST_IF_OPEN();
 
 -- -----------------------------------------------------------
 -- COMMIT_AND_MR: open GitHub PR after dbt passes
