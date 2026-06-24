@@ -1,8 +1,10 @@
 -- =============================================================
 -- teardown.sql
 -- Removes all objects created by the self-healing demo.
--- Run as ACCOUNTADMIN. Safe to run on trial or full accounts —
--- every statement uses IF EXISTS so missing objects are skipped.
+-- Run as ACCOUNTADMIN. Safe to run on trial or full accounts,
+-- with one exception: the ALTER POSTGRES INSTANCE statement in
+-- section 2 is full-version only — trial users can ignore the
+-- error it produces (SELFHEALING_PG does not exist on trial).
 --
 --   snow sql -c <connection> -f config/teardown.sql
 -- =============================================================
@@ -16,9 +18,11 @@ USE ROLE ACCOUNTADMIN;
 
 
 -- ── 2. Detach network policy from Snowflake Postgres instance ──
+--       Full version only — trial users skip these two lines.
 --       Must happen before dropping SELFHEALING_PROD, which contains
 --       the PG_INGRESS_RULE network rule referenced by the policy.
---       Harmless if the instance or policy does not exist.
+--       ALTER POSTGRES INSTANCE has no IF EXISTS; it errors cleanly
+--       if SELFHEALING_PG does not exist (trial) and can be ignored.
 ALTER POSTGRES INSTANCE SELFHEALING_PG UNSET NETWORK_POLICY;
 DROP NETWORK POLICY IF EXISTS SELFHEALING_PG_POLICY;
 
