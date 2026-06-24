@@ -249,7 +249,9 @@ The full version replaces `trial_bronze_setup.sql` with live CDC. **Set this up 
    | Destination | `Snowflake Warehouse` / `Snowflake Role` | `SELFHEALING_WH` / `<openflow_runtime_role>` |
    | Destination | `Snowflake Account Identifier` | org-account form, e.g. `MYORG-MYACCOUNT` |
    | Ingestion | `Object Identifier Resolution` | `CASE_INSENSITIVE` |
-   | Ingestion | `Included Table Names` | `retail.customers,retail.orders,retail.order_items` |
+   | Ingestion | `Included Table Regex` | `retail\..*` |
+
+   > **Why regex, not explicit table names?** The `NEW_TABLE` self-healing scenario relies on Openflow automatically snapshotting new tables as soon as they are added to the PostgreSQL publication. With an explicit `Included Table Names` list the connector ignores new tables until the list is manually updated. With `Included Table Regex` set to `retail\..*`, any table added to the `retail` schema and publication is picked up automatically — no connector config change required.
 
    Start the connector and confirm rows land before continuing:
    ```bash
@@ -414,6 +416,18 @@ python3 config/materialise_in_dev.py <event-id>
 > ALTER TABLE SELFHEALING_PROD.BRONZE.ORDERS ADD COLUMN \"DISCOUNT_CODE__SNOWFLAKE_DELETED\" VARCHAR;"
 > ```
 > The detector raises a `COLUMN_DROP` event for `DISCOUNT_CODE`, and `GENERATE_NEXT_PENDING` regenerates the impacted models with the column removed.
+
+> **Full version — new table end-to-end.** Create the table in PostgreSQL, add it to the publication, and Openflow snapshots it into BRONZE automatically (connector must use `Included Table Regex`, not `Included Table Names`):
+> ```bash
+> psql $PG_CONNECTION -c "
+> CREATE TABLE retail.shipments (
+>   shipment_id VARCHAR(36) PRIMARY KEY, order_id VARCHAR(36) NOT NULL,
+>   carrier VARCHAR(50), tracking_number VARCHAR(100),
+>   shipped_at TIMESTAMPTZ DEFAULT now(), status VARCHAR(50),
+>   created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+> ALTER PUBLICATION selfhealing_pub ADD TABLE retail.shipments;"
+> ```
+> Wait ~2 min for Openflow to snapshot the table into BRONZE, then fire the detector.
 
 > **Simulating a new table on trial.** Create a table directly in BRONZE. It **must** include the Openflow metadata columns the SILVER template relies on (`_SNOWFLAKE_INSERTED_AT`, `_SNOWFLAKE_UPDATED_AT`, `_SNOWFLAKE_DELETED`); the first non-metadata column becomes the primary key:
 > ```bash
