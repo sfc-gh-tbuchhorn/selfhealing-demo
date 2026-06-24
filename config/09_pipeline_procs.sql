@@ -478,7 +478,25 @@ def run(session):
         WHERE pipeline_status = 'GENERATING'
     """).collect()
 
-    # Any event in PR_OPEN after the DAG ran means dbt failed
+    # Guard: only mark CI_FAILED if RUN_DEV_TEST actually ran and failed in
+    # this DAG execution.  When PIPELINE_ROOT itself fails before triggering
+    # RUN_DEV_TEST (e.g. transient auth error), this FINALIZER still fires via
+    # the FINALIZE relationship — but the PR_OPEN event belongs to an active CI
+    # run, not a failed one.  Touching it here would wrongly clobber a live run.
+    test_state_rows = session.sql("""
+        SELECT state
+        FROM TABLE(SELFHEALING_PROD.INFORMATION_SCHEMA.TASK_HISTORY(
+            TASK_NAME=>'RUN_DEV_TEST',
+            SCHEDULED_TIME_RANGE_START=>DATEADD('minute', -15, CURRENT_TIMESTAMP())
+        ))
+        ORDER BY scheduled_time DESC
+        LIMIT 1
+    """).collect()
+
+    if not test_state_rows or test_state_rows[0]['STATE'] != 'FAILED':
+        return 'RUN_DEV_TEST did not fail — PIPELINE_ROOT failed before CI ran; skipping CI_FAILED'
+
+    # RUN_DEV_TEST genuinely failed: any event still in PR_OPEN is the culprit
     rows = session.sql("""
         SELECT event_id, change_type, table_name, mr_url
         FROM SELFHEALING_PROD.CONFIG.SCHEMA_CHANGE_EVENTS
