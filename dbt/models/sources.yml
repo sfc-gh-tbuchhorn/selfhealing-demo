@@ -1,10 +1,10 @@
 version: 2
+
 sources:
-- name: bronze
-  database: '{{ var(''db_name'') }}'
-  schema: BRONZE
-  tables:
-  - name: customers
-  - name: orders
-  - name: order_items
-  - name: shipments
+  - name: bronze
+    database: "{{ var('db_name') }}"
+    schema: BRONZE
+    tables:
+      - name: customers
+      - name: orders
+      - name: order_items
